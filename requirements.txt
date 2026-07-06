@@ -1,5 +1,7 @@
+google-generativeai==0.8.6
+grpcio==1.62.2
+grpcio-status==1.62.2
 discord.py==2.5.2
 Pillow
-google-generativeai
 aiohttp
 pytz
