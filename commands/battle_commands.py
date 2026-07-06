@@ -134,6 +134,37 @@ class BattleCommandsCog(commands.Cog):
         embed.set_footer(text="이제 /전투 · /주간보스에서 이 냥이의 속성 상성이 적용됩니다.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="편성해제", description="선봉 냥이 편성을 해제합니다. (전투/주간보스에서 속성 상성 미적용)")
+    async def team_unset_command(self, interaction: discord.Interaction):
+        fp = get_user_filepath(str(interaction.user.id))
+        # ★ 순수 로드: 마이그레이션/기본값 주입 없이 원본 그대로 읽는다.
+        data = load_json(fp, None)
+        if data is None:
+            await interaction.response.send_message(
+                "❌ 아직 가입하지 않았습니다. `/가입` 후 이용해주세요.", ephemeral=True
+            )
+            return
+
+        team = data.get("battle_team") or []
+        prev_lead = team[0] if isinstance(team, list) and team else None
+        if not prev_lead:
+            await interaction.response.send_message(
+                "이미 편성된 선봉이 없습니다. `/편성 [냥이]`로 지정할 수 있습니다.", ephemeral=True
+            )
+            return
+
+        # ★ battle_team만 초기화 — 그 외 유저 데이터는 절대 건드리지 않는다.
+        data["battle_team"] = []
+        save_json(fp, data)
+
+        embed = discord.Embed(
+            title="↩️ 선봉 편성 해제",
+            description=f"**{prev_lead}** 선봉 편성을 해제했습니다.\n이후 `/전투`·`/주간보스`에서 속성 상성이 적용되지 않습니다.",
+            color=COLOR_DEFAULT,
+        )
+        embed.set_footer(text="다시 지정하려면 /편성 [냥이]")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @app_commands.command(name="전투", description="야생의 적과 전투합니다!")
     async def battle_command(self, interaction):
         uid = interaction.user.id
