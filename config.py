@@ -1,17 +1,3 @@
-# config.example.py — 시크릿 제거 템플릿
-# ─────────────────────────────────────────────────────
-# 사용법: 이 파일을 config.py 로 복사한 뒤, 아래 환경변수를 설정하거나
-#         직접 값을 채워 넣으세요. 실제 config.py 는 .gitignore 로 보호됩니다.
-#
-# 필요한 환경변수:
-#   BOT_TOKEN            디스코드 봇 토큰
-#   TEST_BOT_TOKEN       (선택) 테스트 봇 토큰
-#   GOOGLE_API_KEYS      Gemini API 키들 (콤마로 구분: key1,key2,key3)
-#   DISHOST_API_KEY      디스호스트 API 키
-#   ADMIN_WEBHOOK_URL / REPORT_WEBHOOK_URL / WELCOME_WEBHOOK_URL / RARE_CATCH_WEBHOOK_URL
-#   그리고 kayoko.json (Google 서비스계정 키)도 별도로 배치하세요.
-# ─────────────────────────────────────────────────────
-
 # config.py
 # ──────────────────────────────────────────────────────────
 # 카요코 봇 리워크 - 전역 설정 및 상수 (밸런스 v2)
@@ -19,6 +5,15 @@
 
 import os
 from zoneinfo import ZoneInfo
+
+# 로컬 개발 편의를 위해 .env 파일이 있으면 자동 로드합니다.
+# (python-dotenv 미설치 시 조용히 무시 — 배포 환경에서는 보통
+#  플랫폼이 환경변수를 직접 주입하므로 필요 없습니다.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # config.py 기존 내용 끝에 추가
 
@@ -73,14 +68,24 @@ os.makedirs("data/memory", exist_ok=True)
 # ═══════════════════════════════════════════════════════════
 # 봇 기본 설정
 # ═══════════════════════════════════════════════════════════
-TestBuild = os.getenv("TEST_BOT_TOKEN", "")
-KayokoToken = os.getenv("BOT_TOKEN", "")
+# 시크릿은 코드에 하드코딩하지 않고 환경변수에서 읽습니다.
+# 로컬 개발 시 .env 파일을 만들어 사용하세요 (.env.example 참고).
+TestBuild = os.getenv("DISCORD_TEST_TOKEN", "")
+KayokoToken = os.getenv("DISCORD_BOT_TOKEN", "")
 
-BOT_TOKEN = KayokoToken
+# BOT_ENV=test 이면 TestBuild, 그 외(prod 등)면 KayokoToken 사용
+# BOT_TOKEN을 직접 지정하면 그 값이 우선됩니다.
+BOT_TOKEN = os.getenv("BOT_TOKEN") or (
+    TestBuild if os.getenv("BOT_ENV", "test") == "test" else KayokoToken
+)
 
 # Gemini API 키 리스트 (로테이션용)
 # 한도 초과 시 자동으로 다음 키로 전환됩니다.
-GOOGLE_API_KEYS = [k.strip() for k in os.getenv("GOOGLE_API_KEYS", "").split(",") if k.strip()]
+# 환경변수 GOOGLE_API_KEYS 에 쉼표(,)로 구분해서 여러 개 등록하세요.
+# 예) GOOGLE_API_KEYS="key1,key2,key3"
+GOOGLE_API_KEYS = [
+    key.strip() for key in os.getenv("GOOGLE_API_KEYS", "").split(",") if key.strip()
+]
 
 GEMINI_MODEL_NAME = "gemini-2.5-flash"
 
@@ -100,7 +105,7 @@ SERVER_ADMIN_PERMISSION = "manage_guild"
 
 # ── 디스호스트 API ──
 DISHOST_API_KEY = os.getenv("DISHOST_API_KEY", "")
-DISHOST_API_URL = "https://listapi.dishost.kr"
+DISHOST_API_URL = os.getenv("DISHOST_API_URL", "https://listapi.dishost.kr")
 DISHOST_STATS_INTERVAL = 3600  # 1시간(초)
 
 # ── 투표 보상 ──
@@ -124,7 +129,7 @@ ADMIN_WEBHOOK_URL = os.getenv("ADMIN_WEBHOOK_URL", "")
 REPORT_WEBHOOK_URL = os.getenv("REPORT_WEBHOOK_URL", "")
 WELCOME_WEBHOOK_URL = os.getenv("WELCOME_WEBHOOK_URL", "")
 RARE_CATCH_WEBHOOK_URL = os.getenv("RARE_CATCH_WEBHOOK_URL", "")
-ANTICHEAT_WEBHOOK_URL = ADMIN_WEBHOOK_URL
+ANTICHEAT_WEBHOOK_URL = os.getenv("ANTICHEAT_WEBHOOK_URL", ADMIN_WEBHOOK_URL)
 
 # ═══════════════════════════════════════════════════════════
 # 디렉토리 / 파일 경로
@@ -572,7 +577,6 @@ ADMIN_IDS = ALLOWED_ADMIN_IDS
 # ── gameplay.py 호환 ──
 TUTORIAL_COMPLETE_REWARD = TUTORIAL_COMPLETION_REWARD
 KIDNAP_BASE_REWARD = KIDNAP_BASE_MONEY_REWARD
-
 # ═══════════════════════════════════════════════════════════
 # 냥이 성작(星作) / 초월 강화 시스템  +  엘리그마 경제
 #  · 0성 시작 → 최대 5성(노란별) → 전무 3성(파란별, 5성 이후 초월)
