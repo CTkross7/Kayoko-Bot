@@ -571,13 +571,14 @@ class CatdexView(discord.ui.View):
 # ============================================================
 
 class AdoptConfirmView(discord.ui.View):
-    def __init__(self, user, cat_id, cat_name, rarity, sell_price):
+    def __init__(self, user, cat_id, cat_name, rarity, unit_price, amount):
         super().__init__(timeout=30)
         self.user = user
         self.cat_id = str(cat_id)
         self.cat_name = cat_name
         self.rarity = rarity
-        self.sell_price = sell_price
+        self.unit_price = int(unit_price)
+        self.amount = int(amount)
 
     @discord.ui.button(label="✅ 분양하기", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -593,27 +594,41 @@ class AdoptConfirmView(discord.ui.View):
             await interaction.response.edit_message(embed=discord.Embed(title="❌ 오류", description="해당 냥이를 보유하고 있지 않습니다.", color=COLOR_ERROR), view=None)
             return
         info = cats[self.cat_id]
-        count = info.get("count", 1) if isinstance(info, dict) else 1
-        if count <= 1:
-            del cats[self.cat_id]
-        else:
-            if isinstance(info, dict):
-                info["count"] = count - 1
-        user_data["money"] = user_data.get("money", 0) + self.sell_price
+        owned_count = info.get("count", 1) if isinstance(info, dict) else 1
 
-        # ── 엘리그마 확률 드랍 (희귀할수록 ↑, 일일 한도 적용) ──
-        eligma_gained = 0
+        # ★ 재확인: 확인 뷰가 열려있는 사이 다른 곳에서 팔렸을 가능성 방어
+        actual_amount = min(self.amount, owned_count)
+        if actual_amount <= 0:
+            await interaction.response.edit_message(embed=discord.Embed(title="❌ 오류", description="분양할 냥이가 없습니다.", color=COLOR_ERROR), view=None)
+            return
+
+        # 수량 차감
+        new_count = owned_count - actual_amount
+        if new_count <= 0:
+            del cats[self.cat_id]
+        elif isinstance(info, dict):
+            info["count"] = new_count
+
+        # 골드 정산
+        total_gold = self.unit_price * actual_amount
+        user_data["money"] = user_data.get("money", 0) + total_gold
+
+        # ── 엘리그마 확률 드랍 (마리당 개별 판정, 일일 한도 자동 적용) ──
+        eligma_total = 0
         try:
             from systems.enhancement import roll_eligma_drop
-            eligma_gained = roll_eligma_drop(user_data, self.rarity)
+            for _ in range(actual_amount):
+                eligma_total += roll_eligma_drop(user_data, self.rarity)
         except Exception:
-            eligma_gained = 0
+            pass
 
         save_user_data(self.user.id, user_data)
 
-        desc = f"**{self.cat_name}**을(를) 분양했습니다.\n💰 **+{self.sell_price:,}원** 획득!"
-        if eligma_gained > 0:
-            desc += f"\n🔷 **+{eligma_gained} 엘리그마** 드랍! (강화 재료)"
+        desc = f"**{self.cat_name}** × **{actual_amount}마리** 분양 완료!\n💰 **+{total_gold:,}원** 획득 (마리당 {self.unit_price:,}원)"
+        if eligma_total > 0:
+            desc += f"\n🔷 **+{eligma_total} 엘리그마** 획득! (강화 재료)"
+        if actual_amount < self.amount:
+            desc += f"\n\n⚠️ 요청 {self.amount}마리 중 실제 {actual_amount}마리만 처리됨 (보유 부족)"
         embed = discord.Embed(title="✅ 분양 완료!", description=desc, color=COLOR_SUCCESS)
         embed.set_footer(text="카요코 봇", icon_url=BOT_ICON_URL)
         await interaction.response.edit_message(embed=embed, view=None)
@@ -902,9 +917,48 @@ class GameplayCog(commands.Cog):
 
     # ---- /냥이분양 ----
     @app_commands.command(name="냥이분양", description="보유한 냥이를 분양(판매)합니다.")
-    @app_commands.describe(cat_name="분양할 냥이 이름")
-    async def adopt_command(self, interaction: discord.Interaction, cat_name: str):
+    async def _owned_cats_autocomplete(self, interaction: discord.Interaction, current: str):
+        """보유한 일반 냥이 자동완성 (이름 · 보유 수량 표시). 강화 냥이는 제외."""
+        user_data = load_user_data(interaction.user.id) or {}
+        cats = user_data.get("cats", {})
+        cur = (current or "").lower()
+        choices = []
+        if isinstance(cats, dict):
+            for cid, info in cats.items():
+                nm = info.get("name", cid) if isinstance(info, dict) else cid
+                if not isinstance(nm, str) or not nm:
+                    continue
+                cnt = info.get("count", 1) if isinstance(info, dict) else 1
+                try:
+                    cnt = int(cnt)
+                except (ValueError, TypeError):
+                    cnt = 1
+                if cnt <= 0:
+                    continue
+                if cur and cur not in nm.lower():
+                    continue
+                choices.append((nm, cnt))
+        choices.sort(key=lambda x: (-x[1], x[0]))  # 많이 보유한 순
+        return [
+            app_commands.Choice(name=f"{nm} ({cnt}마리)"[:100], value=nm)
+            for nm, cnt in choices[:25]
+        ]
+
+    @app_commands.describe(
+        cat_name="분양할 냥이 (자동완성)",
+        amount="분양 마리 수 (기본 1, 최대 999)",
+    )
+    @app_commands.autocomplete(cat_name=_owned_cats_autocomplete)
+    async def adopt_command(self, interaction: discord.Interaction, cat_name: str, amount: int = 1):
         await interaction.response.defer()
+        # ── 수량 검증 ──
+        if amount <= 0:
+            await interaction.followup.send("❌ 마리 수는 1 이상이어야 합니다.", ephemeral=True)
+            return
+        if amount > 999:
+            await interaction.followup.send("❌ 한 번에 최대 999마리까지 분양 가능합니다.", ephemeral=True)
+            return
+
         user_data = load_user_data(interaction.user.id)
         if not user_data:
             await interaction.followup.send("❌ 등록된 유저가 아닙니다.", ephemeral=True)
@@ -924,25 +978,53 @@ class GameplayCog(commands.Cog):
         if not target_id:
             await interaction.followup.send(f"❌ **{cat_name}** 냥이를 보유하고 있지 않습니다.", ephemeral=True)
             return
+        owned_count = target_info.get("count", 1) if isinstance(target_info, dict) else 1
+        try:
+            owned_count = int(owned_count)
+        except (ValueError, TypeError):
+            owned_count = 1
+        if owned_count < amount:
+            await interaction.followup.send(
+                f"❌ **{target_info.get('name', cat_name)}** 보유 수량이 부족합니다. "
+                f"(요청 {amount}마리 · 보유 {owned_count}마리)",
+                ephemeral=True,
+            )
+            return
+
         rarity = _safe_rarity_str(target_info.get("rarity", "common"))
         tier = RARITY_TIERS.get(rarity, RARITY_TIERS.get("common", {}))
         base_price = tier.get("sell_price_range", (300, 1000))
         if isinstance(base_price, tuple):
             base_price = (base_price[0] + base_price[1]) // 2
         sell_bonus = get_skill_effect(user_data, "trade", "sell_price_bonus")
-        final_price = int(base_price * (1 + sell_bonus / 100))
+        unit_price = int(base_price * (1 + sell_bonus / 100))
+        total_price = unit_price * amount
 
-        view = AdoptConfirmView(interaction.user, target_id, target_info.get("name", cat_name), rarity, final_price)
+        # 엘리그마 예상 (희귀도 정보 노출)
+        try:
+            from config import ELIGMA_DROP_TABLE
+            tbl = ELIGMA_DROP_TABLE.get(rarity, {})
+            drop_chance = int(tbl.get("chance", 0) * 100)
+            lo, hi = tbl.get("amount", (0, 0))
+            eligma_hint = f"🔷 예상 엘리그마: 마리당 **{drop_chance}%** 확률로 {lo}~{hi}개 (일일 한도 있음)"
+        except Exception:
+            eligma_hint = ""
+
+        view = AdoptConfirmView(
+            interaction.user, target_id, target_info.get("name", cat_name),
+            rarity, unit_price, amount,
+        )
         embed = discord.Embed(
             title="🐱 냥이 분양 확인",
             description=(
                 f"**{target_info.get('name', cat_name)}** ({tier.get('name', rarity)})\n"
-                f"보유: **{target_info.get('count', 1)}마리**\n"
-                f"💰 판매가: **{final_price:,}원** (1마리)"
+                f"보유: **{owned_count}마리** · 분양: **{amount}마리**\n"
+                f"💰 마리당 **{unit_price:,}원** · 합계 **{total_price:,}원**"
+                + (f"\n{eligma_hint}" if eligma_hint else "")
             ),
             color=tier.get("color", COLOR_DEFAULT),
         )
-        embed.set_footer(text="카요코 봇", icon_url=BOT_ICON_URL)
+        embed.set_footer(text="카요코 봇 · 30초 후 자동 취소", icon_url=BOT_ICON_URL)
         await interaction.followup.send(embed=embed, view=view)
 
     # ---- /송금 ----
