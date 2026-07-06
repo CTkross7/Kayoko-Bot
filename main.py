@@ -778,6 +778,7 @@ async def on_ready():
         "commands.server_settings",
         "commands.vote_commands",
         "commands.enhancement_commands",
+        "commands.raid_commands",
 
     ]
     for cog in cog_modules:

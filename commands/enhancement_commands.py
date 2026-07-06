@@ -126,6 +126,73 @@ def _action_with_select(owner_id, data, iid):
     return view
 
 
+# ─── 장비 강화 ───────────────────────────────────────────────
+
+def _equip_embed(user_data: dict, unique_id: str) -> discord.Embed:
+    item = E._find_equipment(user_data, unique_id)
+    if not item:
+        return discord.Embed(title="❌ 오류", description="장비를 찾을 수 없습니다.", color=COLOR_ERROR)
+    level = int(item.get("enhance_level", 0))
+    rarity = item.get("grade", item.get("rarity", "common"))
+    embed = discord.Embed(title=f"🛠️ {item.get('name','장비')} 강화", color=COLOR_DEFAULT)
+    stats = item.get("stats", {})
+    mult = 1.0 + level * _cfg.EQUIP_ENHANCE_STAT_MULT
+    stat_txt = " · ".join(f"{k} +{int(v*mult)}" for k, v in stats.items()) or "-"
+    embed.add_field(name=f"현재 +{level}", value=f"실효 스탯: {stat_txt} (x{mult:.2f})", inline=False)
+    if level < _cfg.EQUIP_MAX_ENHANCE:
+        c = E.equip_enhance_cost(rarity, level)
+        fail = _cfg.EQUIP_FAIL_CHANCE.get(level, 0) * 100
+        dest = _cfg.EQUIP_DESTROY_CHANCE.get(level, 0) * 100
+        risk = (f" · 실패 {fail:.0f}%" + (f" · 파괴 {dest:.0f}%" if dest else "")) if fail else ""
+        embed.add_field(name=f"강화 → +{level+1}",
+                        value=f"💰 {c['gold']:,}원 · {ELIGMA} {c['eligma']:,}{risk}", inline=False)
+    else:
+        embed.add_field(name="최대 강화", value=f"✅ +{_cfg.EQUIP_MAX_ENHANCE} 달성", inline=False)
+    embed.set_footer(text=f"보유: 💰 {user_data.get('money',0):,}원 · {ELIGMA} {user_data.get('eligma',0):,}")
+    return embed
+
+
+class EquipSelect(discord.ui.Select):
+    def __init__(self, owner_id, items):
+        self.owner_id = owner_id
+        options = [discord.SelectOption(label=label[:100], value=uid)
+                   for (uid, label, lv, rarity) in items[:25]]
+        super().__init__(placeholder="강화할 장비를 선택하세요...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("본인만 조작할 수 있습니다.", ephemeral=True)
+            return
+        data = load_user_data(self.owner_id)
+        uid = self.values[0]
+        view = EquipEnhanceView(self.owner_id, E.list_enhanceable_equipment(data), selected=uid)
+        await interaction.response.edit_message(embed=_equip_embed(data, uid), view=view)
+
+
+class EquipEnhanceView(discord.ui.View):
+    def __init__(self, owner_id, items, selected=None):
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+        self.selected = selected or (items[0][0] if items else None)
+        if items:
+            self.add_item(EquipSelect(owner_id, items))
+
+    @discord.ui.button(label="🛠️ 강화", style=discord.ButtonStyle.success)
+    async def enhance_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("본인만 조작할 수 있습니다.", ephemeral=True)
+            return
+        data = load_user_data(self.owner_id)
+        ok, msg = E.equip_enhance(data, self.selected)
+        if ok:
+            save_user_data(self.owner_id, data)
+        embed = _equip_embed(data, self.selected)
+        embed.description = msg
+        # 셀렉트 갱신
+        view = EquipEnhanceView(self.owner_id, E.list_enhanceable_equipment(data), selected=self.selected)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class EnhancementCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -203,6 +270,21 @@ class EnhancementCog(commands.Cog):
             embed = discord.Embed(title="🔧 강화 냥이", color=COLOR_DEFAULT)
             embed.description = "\n".join(f"{r[1]} — {r[2]}" for r in rows)
             await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="장비강화", description="장비 티어를 강화합니다. (재료 + 실패/파괴)")
+    async def equip_enhance_command(self, interaction: discord.Interaction):
+        data = load_user_data(interaction.user.id)
+        if not data:
+            await interaction.response.send_message("❌ 먼저 `/가입` 해주세요.", ephemeral=True)
+            return
+        items = E.list_enhanceable_equipment(data)
+        if not items:
+            await interaction.response.send_message(
+                "강화할 장비가 없습니다. `/상점`에서 장비를 구매하세요.", ephemeral=True)
+            return
+        view = EquipEnhanceView(interaction.user.id, items)
+        await interaction.response.send_message(
+            embed=_equip_embed(data, items[0][0]), view=view, ephemeral=True)
 
     @app_commands.command(name="엘리그마", description="엘리그마 보유량과 오늘 획득 현황을 봅니다.")
     async def eligma_command(self, interaction: discord.Interaction):

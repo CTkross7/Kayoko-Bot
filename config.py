@@ -633,3 +633,57 @@ TRANSCEND_STAT_MULT = 0.30   # 전무별당 +30%
 STAR_EMOJI = "⭐"
 TRANSCEND_EMOJI = "🌟"       # 파란별 대용
 ELIGMA_EMOJI = "🔷"          # 엘리그마
+
+# ═══════════════════════════════════════════════════════════
+# 장비 티어 강화 (냥이 강화 패턴 재사용: 재료 + 실패/파괴)
+# ═══════════════════════════════════════════════════════════
+
+EQUIP_MAX_ENHANCE = 10           # 장비 최대 +10
+EQUIP_ENHANCE_STAT_MULT = 0.12   # 레벨당 +12% 스탯
+EQUIP_ENHANCE_BASE_GOLD = 5000
+EQUIP_ENHANCE_GOLD_GROWTH = 1.55
+EQUIP_ENHANCE_BASE_ELIGMA = 2
+EQUIP_ENHANCE_ELIGMA_GROWTH = 1.45
+# 장비 희귀도별 재료 가중
+EQUIP_RARITY_COST_MULT = {
+    "common": 1.0, "uncommon": 1.3, "rare": 1.8, "epic": 2.5, "legendary": 3.5,
+}
+# 실패/파괴 (level → level+1 시도 시). 실패=재료 소진, 파괴=레벨 1하락(극저확률)
+EQUIP_FAIL_CHANCE = {0:0.0,1:0.0,2:0.0,3:0.10,4:0.18,5:0.25,6:0.32,7:0.40,8:0.48,9:0.55}
+EQUIP_DESTROY_CHANCE = {0:0.0,1:0.0,2:0.0,3:0.0,4:0.0,5:0.02,6:0.03,7:0.04,8:0.05,9:0.06}
+
+# ═══════════════════════════════════════════════════════════
+# 시즌 총력전 / 대결전 (전서버 공유 HP + 누적 딜 랭킹 + 레벨제한)
+#  · 버스방지: 딜은 본인 보유·강화 냥이 기준으로만 산정
+# ═══════════════════════════════════════════════════════════
+
+RAID_STATE_FILE = os.path.join(BASE_DIR, "data", "raid_boss.json")
+
+RAID_LEVEL_REQ = 25            # 계정 레벨 제한 (무임승차/저렙 버스 방지)
+RAID_DAILY_ATTEMPTS = 3        # 일일 공격 횟수
+RAID_DAMAGE_SCALE = 5.0        # 딜 환산 배율 (밸런스 노브 — 서버 규모에 맞춰 조정)
+RAID_TOP_ENHANCED_COUNT = 5    # 딜 산정에 쓰는 상위 강화 냥이 수
+RAID_SEASON_DAYS = 7           # 시즌 길이(일)
+
+# 시즌마다 순환하는 보스 (실제 블루아카이브 총력전/대결전 보스)
+RAID_BOSS_TEMPLATES = [
+    {"key": "binah",       "name": "비나",        "defense_type": "light",   "base_hp": 250000, "attack_type": "piercing", "terrain": "실내"},
+    {"key": "chesed",      "name": "헤세드",      "defense_type": "heavy",   "base_hp": 292000, "attack_type": "explosive","terrain": "야외"},
+    {"key": "shirokuro",   "name": "시로쿠로",    "defense_type": "special", "base_hp": 333000, "attack_type": "mystic",   "terrain": "시가지"},
+    {"key": "hieronymus",  "name": "히에로니무스","defense_type": "light",   "base_hp": 375000, "attack_type": "mystic",   "terrain": "실내"},
+    {"key": "kaiten",      "name": "카이텐 FX",   "defense_type": "heavy",   "base_hp": 417000, "attack_type": "piercing", "terrain": "시가지"},
+    {"key": "perorozilla", "name": "페로로지라",  "defense_type": "special", "base_hp": 458000, "attack_type": "explosive","terrain": "야외"},
+    {"key": "hod",         "name": "호버크래프트","defense_type": "elastic",  "base_hp": 500000, "attack_type": "sonic",    "terrain": "야외"},
+    {"key": "goz",         "name": "고즈",        "defense_type": "heavy",   "base_hp": 542000, "attack_type": "mystic",   "terrain": "실내"},
+    {"key": "gregorius",   "name": "그레고리오",  "defense_type": "elastic",  "base_hp": 583000, "attack_type": "sonic",    "terrain": "시가지"},
+    {"key": "kurokage",    "name": "쿠로카게",    "defense_type": "light",   "base_hp": 625000, "attack_type": "piercing", "terrain": "실내"},
+]
+
+# 랭킹 백분위별 보상 (누적 딜 기여도 → 무임승차 방지)
+RAID_RANK_REWARDS = [
+    {"top": 0.01, "label": "👑 1%",  "money": 200000, "eligma": 120, "tuna_can": 10},
+    {"top": 0.05, "label": "💎 5%",  "money": 120000, "eligma": 70,  "tuna_can": 6},
+    {"top": 0.20, "label": "🥇 20%", "money": 60000,  "eligma": 35,  "tuna_can": 3},
+    {"top": 0.50, "label": "🥈 50%", "money": 25000,  "eligma": 15,  "tuna_can": 1},
+    {"top": 1.00, "label": "🥉 참여", "money": 8000,   "eligma": 5,   "tuna_can": 0},
+]

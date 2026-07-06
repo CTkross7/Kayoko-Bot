@@ -263,13 +263,19 @@ def get_total_equipment_stats(user_data: dict) -> dict:
         if not isinstance(equipped_item, dict):
             continue
 
-        # 정상 dict 처리
+        # 정상 dict 처리 (+ 강화 레벨 반영)
         item_stats = equipped_item.get("stats", {})
         if not isinstance(item_stats, dict):
             continue
+        try:
+            from config import EQUIP_ENHANCE_STAT_MULT
+        except Exception:
+            EQUIP_ENHANCE_STAT_MULT = 0.12
+        enh_level = int(equipped_item.get("enhance_level", 0) or 0)
+        enh_mult = 1.0 + enh_level * EQUIP_ENHANCE_STAT_MULT
         for stat_key, stat_val in item_stats.items():
             try:
-                total[stat_key] = total.get(stat_key, 0) + int(stat_val)
+                total[stat_key] = total.get(stat_key, 0) + int(int(stat_val) * enh_mult)
             except (ValueError, TypeError):
                 continue
 

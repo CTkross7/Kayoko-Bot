@@ -16,6 +16,7 @@ data/sessions.json
 data/death_log.json
 data/death_assassin.json
 data/kayoko_knowledge.vec.json
+data/raid_boss.json
 
 # 루트 런타임 상태 JSON (라이브 데이터)
 admins.json

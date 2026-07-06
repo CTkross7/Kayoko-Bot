@@ -291,3 +291,84 @@ def eligma_status(user_data: dict) -> dict:
         "cap": _cfg.ELIGMA_DAILY_CAP,
         "remaining": max(0, _cfg.ELIGMA_DAILY_CAP - gained),
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# 장비 티어 강화 (냥이 강화와 동일 패턴: 재료 + 실패/파괴)
+# ═══════════════════════════════════════════════════════════
+
+EQUIP_MAX = _cfg.EQUIP_MAX_ENHANCE
+
+
+def _find_equipment(user_data: dict, unique_id: str):
+    """장착 슬롯 + 인벤토리에서 장비 인스턴스를 찾는다. 반환: item dict or None."""
+    slots = user_data.get("equipment", {})
+    if isinstance(slots, dict):
+        for it in slots.values():
+            if isinstance(it, dict) and it.get("unique_id") == unique_id:
+                return it
+    for it in user_data.get("equipment_inventory", []):
+        if isinstance(it, dict) and it.get("unique_id") == unique_id:
+            return it
+    return None
+
+
+def equip_enhance_cost(rarity: str, level: int) -> dict:
+    m = _cfg.EQUIP_RARITY_COST_MULT.get(rarity, 1.0)
+    gold = round(_cfg.EQUIP_ENHANCE_BASE_GOLD * m * (_cfg.EQUIP_ENHANCE_GOLD_GROWTH ** level))
+    eligma = round(_cfg.EQUIP_ENHANCE_BASE_ELIGMA * m * (_cfg.EQUIP_ENHANCE_ELIGMA_GROWTH ** level))
+    return {"gold": int(gold), "eligma": int(eligma)}
+
+
+def equip_enhance(user_data: dict, unique_id: str) -> tuple[bool, str]:
+    """장비를 +1 강화. 데이터 안전: 사전 실패 시 무변경."""
+    _ensure(user_data)
+    item = _find_equipment(user_data, unique_id)
+    if item is None:
+        return False, "❌ 해당 장비를 찾을 수 없습니다. (장착 중이거나 인벤토리에 있어야 합니다)"
+
+    level = int(item.get("enhance_level", 0))
+    if level >= EQUIP_MAX:
+        return False, f"✅ 이미 최대 강화(+{EQUIP_MAX})입니다."
+
+    rarity = item.get("grade", item.get("rarity", "common"))
+    cost = equip_enhance_cost(rarity, level)
+    gold = user_data.get("money", 0)
+    eligma = user_data.get("eligma", 0)
+    if gold < cost["gold"] or eligma < cost["eligma"]:
+        return False, (f"❌ 재료 부족\n필요: 💰 {cost['gold']:,}원 · {_cfg.ELIGMA_EMOJI} {cost['eligma']:,}\n"
+                       f"보유: 💰 {gold:,}원 · {_cfg.ELIGMA_EMOJI} {eligma:,}")
+
+    user_data["money"] = gold - cost["gold"]
+    user_data["eligma"] = eligma - cost["eligma"]
+
+    fail_ch = _cfg.EQUIP_FAIL_CHANCE.get(level, 0.0)
+    destroy_ch = _cfg.EQUIP_DESTROY_CHANCE.get(level, 0.0)
+    roll = random.random()
+    name = item.get("name", "장비")
+
+    if roll < destroy_ch:
+        item["enhance_level"] = max(0, level - 1)
+        return True, f"💥 **파괴!** {name} 강화 단계가 하락했습니다. → **+{item['enhance_level']}** (재료 소진)"
+    if roll < destroy_ch + fail_ch:
+        return True, f"⚠️ **실패...** {name} 강화 실패, 재료만 소진되었습니다. (유지: +{level})"
+
+    item["enhance_level"] = level + 1
+    return True, (f"✅ **강화 성공!** {name} → **+{item['enhance_level']}**\n"
+                  f"소모: 💰 {cost['gold']:,}원 · {_cfg.ELIGMA_EMOJI} {cost['eligma']:,}")
+
+
+def list_enhanceable_equipment(user_data: dict) -> list:
+    """강화 가능한 장비(장착+인벤) 목록. [(unique_id, 표시명, level, rarity)]"""
+    out = []
+    slots = user_data.get("equipment", {})
+    if isinstance(slots, dict):
+        for it in slots.values():
+            if isinstance(it, dict) and it.get("unique_id"):
+                out.append((it["unique_id"], f"[장착] {it.get('name','?')} +{it.get('enhance_level',0)}",
+                            it.get("enhance_level", 0), it.get("grade", "common")))
+    for it in user_data.get("equipment_inventory", []):
+        if isinstance(it, dict) and it.get("unique_id"):
+            out.append((it["unique_id"], f"{it.get('name','?')} +{it.get('enhance_level',0)}",
+                        it.get("enhance_level", 0), it.get("grade", "common")))
+    return out
