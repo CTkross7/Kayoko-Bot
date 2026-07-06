@@ -23,7 +23,8 @@ from config import (
     SKILL_TREE_TRACKING, SKILL_TREE_COMBAT, SKILL_TREE_TRADE,
     RARITY_TIERS, DAILY_LOGIN_REWARD,
     TUTORIAL_STEPS, TUTORIAL_COMPLETE_REWARD,
-    NEWBIE_PROTECTION_DAYS, DAILY_LIMITS
+    NEWBIE_PROTECTION_DAYS, DAILY_LIMITS,
+    KST, USERS_DIR,
 )
 from models.user import (
     load_user_data, save_user_data, create_user_data,
@@ -53,6 +54,41 @@ def _load_json(filepath: str) -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+# ============================================================
+# 프로필 카드 헬퍼
+# ============================================================
+
+async def _fetch_avatar_image(user):
+    """디스코드 아바타를 PIL 이미지로 로드. 실패 시 None (카드가 기본 원형 처리)."""
+    try:
+        import io as _io
+        import aiohttp
+        from PIL import Image
+        asset = user.display_avatar.replace(size=256, format="png")
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(asset.url) as resp:
+                if resp.status == 200:
+                    return Image.open(_io.BytesIO(await resp.read()))
+    except Exception:
+        pass
+    return None
+
+
+def _compute_money_rank(my_money: int) -> str:
+    """전체 유저 중 소지금 순위 (best-effort 스캔). 읽기 전용 — 데이터 변경 없음."""
+    try:
+        higher = 0
+        for fn in os.listdir(USERS_DIR):
+            if not fn.endswith(".json"):
+                continue
+            d = _load_json(os.path.join(USERS_DIR, fn))
+            if isinstance(d, dict) and d.get("money", 0) > my_money:
+                higher += 1
+        return f"{higher + 1:,}위"
+    except Exception:
+        return "-"
 
 
 def _is_user_banned(user_id: str) -> tuple[bool, str]:
@@ -510,59 +546,71 @@ class GeneralCog(commands.Cog):
         shop_discount = get_skill_effect(user_data, SKILL_TREE_TRADE, "shop_discount")
 
         equipped_title = user_data.get("equipped_title")
-        title_display = f"『{equipped_title}』" if equipped_title else ""
 
-        embed = Embed(title=f"💖 {target.display_name}의 캣맘 정보 {title_display}", color=COLOR_PRIMARY)
-        embed.set_thumbnail(url=target.display_avatar.url)
-        embed.add_field(name="📊 기본 정보", value=f"**{level_display}** | {exp:,}/{next_exp:,} EXP\n`{exp_bar}` ({ratio * 100:.1f}%)\n📍 {current_region}", inline=False)
-        embed.add_field(name="💰 재화", value=f"💵 **{money:,}원**\n🐟 **{tuna_can}개**", inline=True)
-        embed.add_field(name="🐱 냥이", value=f"보유: **{total_cats}마리**\n도감: **{catdex_count}종**", inline=True)
-        embed.add_field(name=f"⭐ 스킬 (잔여 {skill_points}P)", value=f"🔍 추적술 Lv.{skills.get(SKILL_TREE_TRACKING, 0)} | ⚔️ 전투술 Lv.{skills.get(SKILL_TREE_COMBAT, 0)} | 💼 상술 Lv.{skills.get(SKILL_TREE_TRADE, 0)}", inline=False)
-
-        effect_parts = []
-        if rare_bonus > 0:
-            effect_parts.append(f"희귀+{rare_bonus:.1f}%")
-        if combat_power > 0:
-            effect_parts.append(f"전투력+{combat_power:.1f}")
-        if shop_discount > 0:
-            effect_parts.append(f"할인-{shop_discount:.1f}%")
-        if effect_parts:
-            embed.add_field(name="🔧 스킬 효과", value=" | ".join(effect_parts), inline=False)
-
-        embed.add_field(name="📈 활동 통계", value=f"🐾 납치: **{total_kidnaps}회** | ⚔️ 전투: **{total_battles}회** (승{battle_wins}) | 🏛️ 미궁 최고: **{best_floor}층**", inline=False)
-
-        if is_newbie(user_data):
-            remaining = get_newbie_days_remaining(user_data)
-            embed.add_field(name="🌱 뉴비 보호", value=f"활성 중 (잔여 **{remaining}일**)", inline=True)
-
-        catchup = calculate_catchup_bonus(user_data)
-        if catchup > 0:
-            embed.add_field(name="📈 캐치업 보너스", value=f"경험치 +**{catchup * 100:.0f}%**", inline=True)
-
-        active_buffs = user_data.get("active_buffs", {})
-        buff_parts = []
-        for bk, bv in active_buffs.items():
-            if isinstance(bv, dict) and bv.get("uses_remaining", 0) > 0:
-                buff_parts.append(f"{bk}+{bv.get('value', 0)}%({bv['uses_remaining']}회)")
-        if buff_parts:
-            embed.add_field(name="🧪 활성 버프", value=" | ".join(buff_parts), inline=False)
-
+        # 업적 수
         achievements = user_data.get("achievements", {})
         if isinstance(achievements, dict):
-            completed = [k for k, v in achievements.items() if v]
+            ach_count = len([k for k, v in achievements.items() if v])
         elif isinstance(achievements, list):
-            completed = achievements
+            ach_count = len(achievements)
         else:
-            completed = []
-        if completed:
-            embed.add_field(name="🏆 업적", value=f"달성: **{len(completed)}개**", inline=True)
+            ach_count = 0
 
         streak = user_data.get("daily_streak", 0)
-        if streak > 0:
-            embed.add_field(name="🔥 연속 출석", value=f"**{streak}일**", inline=True)
 
-        embed.set_footer(text="카요코 봇", icon_url=BOT_ICON_URL)
-        await interaction.followup.send(embed=embed)
+        # ── 프로필 카드 이미지 합성 ──
+        card_data = {
+            "nickname": target.display_name,
+            "title": equipped_title,
+            "level": level,
+            "level_max": level >= MAX_LEVEL,
+            "exp": exp,
+            "next_exp": next_exp,
+            "money": money,
+            "tuna_can": tuna_can,
+            "money_rank": _compute_money_rank(money),
+            "streak": streak,
+            "cats_owned": total_cats,
+            "catdex": catdex_count,
+            "battle_wins": battle_wins,
+            "best_floor": best_floor,
+            "achievements": ach_count,
+            "skill_track": skills.get(SKILL_TREE_TRACKING, 0),
+            "skill_combat": skills.get(SKILL_TREE_COMBAT, 0),
+            "skill_trade": skills.get(SKILL_TREE_TRADE, 0),
+            "footer_date": datetime.now(KST).strftime("%Y/%m/%d %H:%M"),
+        }
+
+        # 커스터마이징 (추후 상점 연동 — 유저별 저장값, 없으면 기본 테마)
+        customization = user_data.get("card_customization") or None
+
+        try:
+            import asyncio
+            avatar_pil = await _fetch_avatar_image(target)
+            from utils.profile_card import render_profile_card
+            buf = await asyncio.to_thread(
+                render_profile_card, card_data, avatar_pil, customization
+            )
+            file = discord.File(buf, filename="profile.png")
+            await interaction.followup.send(file=file)
+        except Exception as e:
+            # ★ 렌더 실패 시 텍스트 폴백 (유저 데이터에는 영향 없음)
+            import traceback
+            traceback.print_exc()
+            level_display = f"Lv.{level}" + (" (MAX)" if level >= MAX_LEVEL else "")
+            fallback = Embed(
+                title=f"💖 {target.display_name}의 캣맘 정보",
+                description=(
+                    f"**{level_display}** | {exp:,}/{next_exp:,} EXP\n"
+                    f"💰 **{money:,}원** | 🐟 {tuna_can}개\n"
+                    f"🐱 보유 {total_cats}마리 | 📖 도감 {catdex_count}종\n"
+                    f"⚔️ 전투 {battle_wins}승 | 🏛️ 미궁 {best_floor}층 | 🏅 업적 {ach_count}개"
+                ),
+                color=COLOR_PRIMARY,
+            )
+            fallback.set_thumbnail(url=target.display_avatar.url)
+            fallback.set_footer(text="카요코 봇 (이미지 생성 실패 — 텍스트로 표시)", icon_url=BOT_ICON_URL)
+            await interaction.followup.send(embed=fallback)
 
     @app_commands.command(name="튜토리얼", description="현재 튜토리얼 진행 상태를 확인합니다.")
     @is_registered()
