@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────
+# 유저/런타임 데이터 — 절대 커밋·푸시하지 않음 (데이터 보호)
+#   git이 추적하지 않으므로, 이후 어떤 pull/checkout에도
+#   아래 파일들은 덮어써지거나 삭제되지 않는다.
+# ─────────────────────────────────────────────────────
+
+# 유저 데이터 (플레이어별 세이브)
+users/
+
+# 서버별 설정 / AI 기억 / 세션
+data/guilds/
+data/memory/
+data/sessions.json
+
+# 런타임 로그·해시·캐시
+data/death_log.json
+data/death_assassin.json
+data/kayoko_knowledge.vec.json
+
+# 루트 런타임 상태 JSON (라이브 데이터)
+admins.json
+anticheat_data.json
+blocked_servers.json
+coupons.json
+used_coupons.json
+debt_cooltimes.json
+donate.json
+monthly_stats.json
+noti_channels.json
+recovered_hashes.json
+recovery_hashes.json
+unlocked_titles_global.json
+user_attempts.json
+user_ban.json
+user_usage.json
+verification_config.json
+data/user_ban.json
+
+# ─────────────────────────────────────────────────────
+# 시크릿 — 절대 커밋 금지 (토큰/API키/서비스계정)
+# ─────────────────────────────────────────────────────
+config.py
+kayoko.json
+kayoko_settings.json
+*.key
+.env
+
+# ─────────────────────────────────────────────────────
+# 파이썬 캐시
+# ─────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo

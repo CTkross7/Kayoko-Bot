@@ -1,0 +1,173 @@
+{
+  "weapons": [
+    {
+      "id": "wooden_bat",
+      "name": "나무 배트",
+      "description": "어디서 주워온 나무 배트. 가볍지만 그래도 맨손보단 낫다.",
+      "rarity": "common",
+      "category": "weapon",
+      "stats": { "attack": 10 },
+      "price": 15000,
+      "sell_price": 3750,
+      "level_required": 1
+    },
+    {
+      "id": "iron_pipe",
+      "name": "철파이프",
+      "description": "공사장에서 수집한 철파이프. 묵직한 타격감이 일품.",
+      "rarity": "uncommon",
+      "category": "weapon",
+      "stats": { "attack": 18 },
+      "price": 55000,
+      "sell_price": 13750,
+      "level_required": 12
+    },
+    {
+      "id": "tactical_baton",
+      "name": "전술 경봉",
+      "description": "특수부대에서 유출된 경봉. 단단하고 휘두르기 쉽다.",
+      "rarity": "rare",
+      "category": "weapon",
+      "stats": { "attack": 30 },
+      "price": 180000,
+      "sell_price": 45000,
+      "level_required": 28
+    },
+    {
+      "id": "kayoko_rifle",
+      "name": "카요코의 특수 소총",
+      "description": "게헨나 소속 카요코가 사용하던 커스텀 소총. 정밀도가 장난이 아니다.",
+      "rarity": "epic",
+      "category": "weapon",
+      "stats": { "attack": 50 },
+      "price": 520000,
+      "sell_price": 130000,
+      "level_required": 45
+    },
+    {
+      "id": "gehenna_masterwork",
+      "name": "게헨나 마스터워크",
+      "description": "게헨나 최고의 장인이 만든 전설의 무기. 압도적인 파괴력.",
+      "rarity": "legendary",
+      "category": "weapon",
+      "stats": { "attack": 80 },
+      "price": 1500000,
+      "sell_price": 375000,
+      "level_required": 60
+    }
+  ],
+  "tools": [
+    {
+      "id": "catnip_pouch",
+      "name": "캣닢 주머니",
+      "description": "고양이를 유인하는 캣닢이 가득 든 주머니.",
+      "rarity": "common",
+      "category": "tool",
+      "stats": { "kidnap_bonus": 3 },
+      "price": 12000,
+      "sell_price": 3000,
+      "level_required": 1
+    },
+    {
+      "id": "silent_sneakers",
+      "name": "소음 차단 운동화",
+      "description": "밀레니엄 기술로 소음을 흡수하는 특수 운동화.",
+      "rarity": "uncommon",
+      "category": "tool",
+      "stats": { "kidnap_bonus": 6 },
+      "price": 48000,
+      "sell_price": 12000,
+      "level_required": 12
+    },
+    {
+      "id": "pro_capture_net",
+      "name": "프로용 포획 그물",
+      "description": "전문 포획꾼이 사용하는 강화 그물. 도망칠 수 없다.",
+      "rarity": "rare",
+      "category": "tool",
+      "stats": { "kidnap_bonus": 12 },
+      "price": 160000,
+      "sell_price": 40000,
+      "level_required": 28
+    },
+    {
+      "id": "abyss_tracker",
+      "name": "심연의 추적 장치",
+      "description": "심연에서 발굴된 고대 추적 장치. 목표를 절대 놓치지 않는다.",
+      "rarity": "epic",
+      "category": "tool",
+      "stats": { "kidnap_bonus": 20 },
+      "price": 480000,
+      "sell_price": 120000,
+      "level_required": 45
+    },
+    {
+      "id": "kayoko_instinct",
+      "name": "카요코의 직감",
+      "description": "전설적인 포획꾼의 본능이 깃든 장비. 냥이의 움직임이 보인다.",
+      "rarity": "legendary",
+      "category": "tool",
+      "stats": { "kidnap_bonus": 35 },
+      "price": 1300000,
+      "sell_price": 325000,
+      "level_required": 60
+    }
+  ],
+  "accessories": [
+    {
+      "id": "lucky_necklace",
+      "name": "행운의 목걸이",
+      "description": "길냥이가 물어다 준 목걸이. 왠지 행운이 올 것 같다.",
+      "rarity": "common",
+      "category": "accessory",
+      "stats": { "hp_bonus": 30 },
+      "price": 10000,
+      "sell_price": 2500,
+      "level_required": 1
+    },
+    {
+      "id": "bulletproof_vest",
+      "name": "방탄 조끼",
+      "description": "전투 전용 방탄 조끼. 충격 흡수 능력이 뛰어나다.",
+      "rarity": "uncommon",
+      "category": "accessory",
+      "stats": { "hp_bonus": 60 },
+      "price": 42000,
+      "sell_price": 10500,
+      "level_required": 12
+    },
+    {
+      "id": "millennium_shield",
+      "name": "밀레니엄 보호막",
+      "description": "밀레니엄 사이언스 스쿨의 기술력이 집약된 에너지 보호막.",
+      "rarity": "rare",
+      "category": "accessory",
+      "stats": { "hp_bonus": 100 },
+      "price": 150000,
+      "sell_price": 37500,
+      "level_required": 28
+    },
+    {
+      "id": "trinity_blessing",
+      "name": "트리니티의 축복",
+      "description": "트리니티 종합학원의 신성한 축복이 깃든 부적.",
+      "rarity": "epic",
+      "category": "accessory",
+      "stats": { "hp_bonus": 160 },
+      "price": 450000,
+      "sell_price": 112500,
+      "level_required": 45
+    },
+    {
+      "id": "abydos_will",
+      "name": "아비도스의 의지",
+      "description": "아비도스 고등학교의 불굴의 의지가 담긴 전설의 장비.",
+      "rarity": "legendary",
+      "category": "accessory",
+      "stats": { "hp_bonus": 250 },
+      "price": 1200000,
+      "sell_price": 300000,
+      "level_required": 60
+    }
+  ]
+}
