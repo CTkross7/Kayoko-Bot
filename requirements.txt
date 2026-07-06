@@ -1,14 +1,5 @@
 discord.py==2.5.2
-gTTS
-numpy
-ffmpeg-python==0.2.0
-aiofiles==24.1.0
-requests==2.32.4
-aiohttp
-pydub
-pynacl
-pytz
-gspread
-google-generativeai
-google-genai
 Pillow
+google-generativeai
+aiohttp
+pytz
