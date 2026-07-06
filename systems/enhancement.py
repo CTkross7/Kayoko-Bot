@@ -118,15 +118,32 @@ def star_label(instance: dict) -> str:
 # 일반 → 강화 인스턴스 승격 (cats에서 1마리 소모)
 # ═══════════════════════════════════════════════════════════
 
-def promote_to_enhanced(user_data: dict, cat_name: str) -> tuple[bool, str, dict | None]:
+def has_enhanced_of(user_data: dict, cat_name: str) -> bool:
+    """이미 같은 이름의 강화 인스턴스가 있는지."""
+    for inst in user_data.get("enhanced_cats", []) or []:
+        if isinstance(inst, dict) and inst.get("name") == cat_name:
+            return True
+    return False
+
+
+def promote_to_enhanced(user_data: dict, cat_name: str, force: bool = False) -> tuple[bool, str, dict | None]:
     """
     스택형 cats에서 1마리를 꺼내 0성 강화 인스턴스로 만든다.
+    force=False(기본)면 이미 같은 이름의 강화 냥이가 있을 때 등록을 거부한다.
     반환: (성공, 메시지, 인스턴스 or None)
     """
     _ensure(user_data)
     cats = user_data.get("cats", {})
     if not isinstance(cats, dict):
         return False, "인벤토리 데이터 오류입니다.", None
+
+    # ★ 중복 방지: 이미 같은 이름의 강화 냥이가 있으면 기본 거부
+    if not force and has_enhanced_of(user_data, cat_name):
+        return False, (
+            f"이미 **{cat_name}**의 강화 인스턴스가 존재합니다.\n"
+            f"기존 강화 냥이를 계속 육성하거나, `/강화해제`로 되돌린 뒤 다시 등록하세요.\n"
+            f"(정말로 별도 강화 인스턴스를 추가하려면 관리자에게 문의)"
+        ), None
 
     # 이름으로 보유 확인
     key = None
@@ -152,6 +169,60 @@ def promote_to_enhanced(user_data: dict, cat_name: str) -> tuple[bool, str, dict
     inst = {"iid": uuid.uuid4().hex[:12], "name": cat_name, "star": 0, "transcend": 0}
     user_data["enhanced_cats"].append(inst)
     return True, f"**{cat_name}**을(를) 강화 대상으로 등록했습니다. (0성)", inst
+
+
+def depromote_enhanced(user_data: dict, iid: str) -> tuple[bool, str, dict | None]:
+    """
+    강화 인스턴스를 제거하고 일반 cats에 1마리 되돌린다.
+    강화 진행도(성/전무)는 소실되며, 투자한 재료의 일부를 엘리그마로 환급.
+    반환: (성공, 메시지, 되돌린 인스턴스 or None)
+    """
+    _ensure(user_data)
+    lst = user_data.get("enhanced_cats") or []
+    if not isinstance(lst, list):
+        return False, "❌ 강화 냥이 데이터 오류입니다.", None
+
+    idx = None
+    for i, inst in enumerate(lst):
+        if isinstance(inst, dict) and inst.get("iid") == iid:
+            idx = i; break
+    if idx is None:
+        return False, "❌ 해당 강화 냥이를 찾을 수 없습니다.", None
+
+    inst = lst.pop(idx)
+    name = inst.get("name", "?")
+    star = int(inst.get("star", 0) or 0)
+    transc = int(inst.get("transcend", 0) or 0)
+
+    # 일반 cats에 1마리 반환 (name 키로 저장 — 기존 관행과 동일)
+    cats = user_data.setdefault("cats", {})
+    if not isinstance(cats, dict):
+        cats = {}
+        user_data["cats"] = cats
+    slot = cats.get(name)
+    if isinstance(slot, dict):
+        slot["count"] = int(slot.get("count", 0)) + 1
+    elif isinstance(slot, (int, float)):
+        cats[name] = int(slot) + 1
+    else:
+        # 새 슬롯 (rarity 조회는 실패해도 문제 없음)
+        rarity = _rarity_of(name)
+        cats[name] = {"name": name, "rarity": rarity, "count": 1}
+
+    # 환급: 소모한 재료의 30%를 엘리그마로 환급 (파괴/실패 소진분은 회수 불가 → 자원 낭비 인센티브 유지)
+    refund_eligma = 0
+    for s in range(star):
+        refund_eligma += star_cost(name, s)["eligma"]
+    for t in range(transc):
+        refund_eligma += transcend_cost(name, t)["eligma"]
+    refund_eligma = int(refund_eligma * 0.3)
+    if refund_eligma > 0:
+        user_data["eligma"] = user_data.get("eligma", 0) + refund_eligma
+
+    detail = f"성작 {star}성 · 전무 {transc}성" if (star or transc) else "0성"
+    tail = f"\n💠 엘리그마 **+{refund_eligma:,}** 환급" if refund_eligma > 0 else ""
+    return True, (f"♻️ **{name}** 강화 인스턴스를 해제하고 일반 인벤토리로 되돌렸습니다.\n"
+                  f"소실 진행도: {detail}{tail}"), inst
 
 
 # ═══════════════════════════════════════════════════════════
@@ -299,18 +370,100 @@ def eligma_status(user_data: dict) -> dict:
 
 EQUIP_MAX = _cfg.EQUIP_MAX_ENHANCE
 
+# ── 장비 정의 캐시 (equipment.json을 ID 키로 평탄화) ──
+_EQUIP_DEF_BY_ID: dict | None = None
 
-def _find_equipment(user_data: dict, unique_id: str):
-    """장착 슬롯 + 인벤토리에서 장비 인스턴스를 찾는다. 반환: item dict or None."""
-    slots = user_data.get("equipment", {})
-    if isinstance(slots, dict):
-        for it in slots.values():
-            if isinstance(it, dict) and it.get("unique_id") == unique_id:
-                return it
-    for it in user_data.get("equipment_inventory", []):
-        if isinstance(it, dict) and it.get("unique_id") == unique_id:
-            return it
-    return None
+
+def _load_equip_defs() -> dict:
+    """equipment.json을 로드하고 {id: definition}으로 평탄화 (카테고리 정보 포함)."""
+    global _EQUIP_DEF_BY_ID
+    if _EQUIP_DEF_BY_ID is not None:
+        return _EQUIP_DEF_BY_ID
+    from data_manager import load_json
+    raw = load_json(_cfg.EQUIPMENT_FILE, {})
+    flat: dict = {}
+    if isinstance(raw, dict):
+        for cat_key, items in raw.items():
+            if not isinstance(items, list):
+                continue
+            slot_from_cat = {"weapons": "weapon", "tools": "tool", "accessories": "accessory"}.get(cat_key, cat_key)
+            for it in items:
+                if isinstance(it, dict) and it.get("id"):
+                    d = dict(it)
+                    d.setdefault("slot", slot_from_cat)
+                    flat[it["id"]] = d
+    _EQUIP_DEF_BY_ID = flat
+    return flat
+
+
+def get_equip_def(item_id: str) -> dict | None:
+    return _load_equip_defs().get(item_id)
+
+
+def _all_owned_equip_ids(user_data: dict) -> list[tuple[str, bool]]:
+    """
+    두 스키마(shop=inventory/equipped=ID문자열, 구=equipment/equipment_inventory=dict)에서
+    보유 장비 ID 목록을 반환. [(item_id, is_equipped)]
+    """
+    result: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+
+    # shop 스키마: equipped (dict, ID 문자열)
+    equipped = user_data.get("equipped") or {}
+    if isinstance(equipped, dict):
+        for v in equipped.values():
+            if isinstance(v, str) and v and v not in seen:
+                seen.add(v); result.append((v, True))
+
+    # shop 스키마: inventory (카테고리 dict, ID 리스트)
+    inv = user_data.get("inventory") or {}
+    if isinstance(inv, dict):
+        for cat_list in inv.values():
+            if isinstance(cat_list, list):
+                for x in cat_list:
+                    if isinstance(x, str) and x and x not in seen:
+                        seen.add(x); result.append((x, False))
+
+    # 구 스키마: equipment (dict, dict/str)
+    legacy_slots = user_data.get("equipment") or {}
+    if isinstance(legacy_slots, dict):
+        for v in legacy_slots.values():
+            if isinstance(v, dict):
+                key = v.get("unique_id") or v.get("id")
+                if key and key not in seen:
+                    seen.add(key); result.append((key, True))
+            elif isinstance(v, str) and v and v not in seen:
+                seen.add(v); result.append((v, True))
+
+    # 구 스키마: equipment_inventory (list, dict/str)
+    for it in user_data.get("equipment_inventory") or []:
+        if isinstance(it, dict):
+            key = it.get("unique_id") or it.get("id")
+            if key and key not in seen:
+                seen.add(key); result.append((key, False))
+        elif isinstance(it, str) and it and it not in seen:
+            seen.add(it); result.append((it, False))
+
+    return result
+
+
+def equip_enhance_level(user_data: dict, item_id: str) -> int:
+    """장비의 현재 강화 레벨. equipment_enhance dict에서 조회."""
+    m = user_data.get("equipment_enhance") or {}
+    if isinstance(m, dict):
+        try:
+            return int(m.get(item_id, 0))
+        except (ValueError, TypeError):
+            return 0
+    return 0
+
+
+def _set_enh_level(user_data: dict, item_id: str, level: int):
+    m = user_data.get("equipment_enhance")
+    if not isinstance(m, dict):
+        m = {}
+        user_data["equipment_enhance"] = m
+    m[item_id] = int(level)
 
 
 def equip_enhance_cost(rarity: str, level: int) -> dict:
@@ -320,18 +473,61 @@ def equip_enhance_cost(rarity: str, level: int) -> dict:
     return {"gold": int(gold), "eligma": int(eligma)}
 
 
-def equip_enhance(user_data: dict, unique_id: str) -> tuple[bool, str]:
-    """장비를 +1 강화. 데이터 안전: 사전 실패 시 무변경."""
-    _ensure(user_data)
-    item = _find_equipment(user_data, unique_id)
-    if item is None:
-        return False, "❌ 해당 장비를 찾을 수 없습니다. (장착 중이거나 인벤토리에 있어야 합니다)"
+def _find_equipment(user_data: dict, item_id: str):
+    """
+    호환용 조회 헬퍼(과거 dict 형태 지원).
+    반환: 정규화된 dict {id, name, grade/rarity, stats, enhance_level}
+    """
+    definition = get_equip_def(item_id)
+    if definition:
+        return {
+            "id": item_id,
+            "name": definition.get("name", "?"),
+            "grade": definition.get("rarity", definition.get("grade", "common")),
+            "stats": definition.get("stats", {}),
+            "enhance_level": equip_enhance_level(user_data, item_id),
+        }
+    # 구 스키마 dict 조회 (unique_id 매칭)
+    legacy_slots = user_data.get("equipment") or {}
+    if isinstance(legacy_slots, dict):
+        for v in legacy_slots.values():
+            if isinstance(v, dict) and v.get("unique_id") == item_id:
+                return v
+    for it in user_data.get("equipment_inventory") or []:
+        if isinstance(it, dict) and it.get("unique_id") == item_id:
+            return it
+    return None
 
-    level = int(item.get("enhance_level", 0))
+
+def equip_enhance(user_data: dict, item_id: str) -> tuple[bool, str]:
+    """
+    장비를 +1 강화. shop/구 스키마 모두 지원.
+    강화 레벨은 user_data["equipment_enhance"][item_id]에 저장 → 스키마 변경 없음.
+    데이터 안전: 사전 실패 시 무변경.
+    """
+    _ensure(user_data)
+
+    # 보유 확인 (양쪽 스키마)
+    owned_ids = {oid for oid, _ in _all_owned_equip_ids(user_data)}
+    if item_id not in owned_ids:
+        return False, "❌ 해당 장비를 보유하고 있지 않습니다. (장착 중이거나 인벤토리에 있어야 합니다)"
+
+    definition = get_equip_def(item_id)
+    if definition is not None:
+        rarity = definition.get("rarity", definition.get("grade", "common"))
+        name = definition.get("name", "장비")
+    else:
+        # 구 스키마 dict fallback
+        item = _find_equipment(user_data, item_id)
+        if not item:
+            return False, "❌ 장비 정의를 찾을 수 없습니다."
+        rarity = item.get("grade", item.get("rarity", "common"))
+        name = item.get("name", "장비")
+
+    level = equip_enhance_level(user_data, item_id)
     if level >= EQUIP_MAX:
         return False, f"✅ 이미 최대 강화(+{EQUIP_MAX})입니다."
 
-    rarity = item.get("grade", item.get("rarity", "common"))
     cost = equip_enhance_cost(rarity, level)
     gold = user_data.get("money", 0)
     eligma = user_data.get("eligma", 0)
@@ -345,30 +541,43 @@ def equip_enhance(user_data: dict, unique_id: str) -> tuple[bool, str]:
     fail_ch = _cfg.EQUIP_FAIL_CHANCE.get(level, 0.0)
     destroy_ch = _cfg.EQUIP_DESTROY_CHANCE.get(level, 0.0)
     roll = random.random()
-    name = item.get("name", "장비")
 
     if roll < destroy_ch:
-        item["enhance_level"] = max(0, level - 1)
-        return True, f"💥 **파괴!** {name} 강화 단계가 하락했습니다. → **+{item['enhance_level']}** (재료 소진)"
+        new_lv = max(0, level - 1)
+        _set_enh_level(user_data, item_id, new_lv)
+        return True, f"💥 **파괴!** {name} 강화 단계가 하락했습니다. → **+{new_lv}** (재료 소진)"
     if roll < destroy_ch + fail_ch:
         return True, f"⚠️ **실패...** {name} 강화 실패, 재료만 소진되었습니다. (유지: +{level})"
 
-    item["enhance_level"] = level + 1
-    return True, (f"✅ **강화 성공!** {name} → **+{item['enhance_level']}**\n"
+    _set_enh_level(user_data, item_id, level + 1)
+    return True, (f"✅ **강화 성공!** {name} → **+{level + 1}**\n"
                   f"소모: 💰 {cost['gold']:,}원 · {_cfg.ELIGMA_EMOJI} {cost['eligma']:,}")
 
 
 def list_enhanceable_equipment(user_data: dict) -> list:
-    """강화 가능한 장비(장착+인벤) 목록. [(unique_id, 표시명, level, rarity)]"""
+    """
+    강화 가능한 장비 목록 [(item_id, 표시명, level, rarity)].
+    shop 스키마(inventory+equipped) + 구 스키마(equipment+equipment_inventory) 모두 포함.
+    """
     out = []
-    slots = user_data.get("equipment", {})
-    if isinstance(slots, dict):
-        for it in slots.values():
-            if isinstance(it, dict) and it.get("unique_id"):
-                out.append((it["unique_id"], f"[장착] {it.get('name','?')} +{it.get('enhance_level',0)}",
-                            it.get("enhance_level", 0), it.get("grade", "common")))
-    for it in user_data.get("equipment_inventory", []):
-        if isinstance(it, dict) and it.get("unique_id"):
-            out.append((it["unique_id"], f"{it.get('name','?')} +{it.get('enhance_level',0)}",
-                        it.get("enhance_level", 0), it.get("grade", "common")))
+    seen_ids = set()
+
+    for item_id, is_equipped in _all_owned_equip_ids(user_data):
+        if item_id in seen_ids:
+            continue
+        seen_ids.add(item_id)
+        definition = get_equip_def(item_id)
+        if definition:
+            name = definition.get("name", "?")
+            rarity = definition.get("rarity", definition.get("grade", "common"))
+        else:
+            item = _find_equipment(user_data, item_id)
+            if not item:
+                continue
+            name = item.get("name", "?")
+            rarity = item.get("grade", item.get("rarity", "common"))
+        lv = equip_enhance_level(user_data, item_id)
+        prefix = "[장착] " if is_equipped else ""
+        out.append((item_id, f"{prefix}{name} +{lv}", lv, rarity))
+
     return out

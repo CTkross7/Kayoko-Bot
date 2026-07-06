@@ -230,13 +230,30 @@ def unequip_item(user_data: dict, slot: str) -> tuple:
 def get_total_equipment_stats(user_data: dict) -> dict:
     """
     현재 장착된 모든 장비의 스탯을 합산하여 반환합니다.
+    shop 스키마("equipped": {slot: id}) + 구 스키마("equipment": {slot: dict}) 모두 지원.
+    강화 레벨(user_data["equipment_enhance"][id])이 있으면 스탯에 반영.
 
     반환: {"attack": 총합, "kidnap_bonus": 총합, "hp_bonus": 총합, ...}
     """
-    equipment_slots = user_data.get("equipment", {"weapon": None, "tool": None, "accessory": None})
+    try:
+        from config import EQUIP_ENHANCE_STAT_MULT
+    except Exception:
+        EQUIP_ENHANCE_STAT_MULT = 0.12
+    enh_map = user_data.get("equipment_enhance") or {}
+    if not isinstance(enh_map, dict):
+        enh_map = {}
 
-    # ★ equipment 자체가 dict가 아닌 경우 안전 처리
-    if not isinstance(equipment_slots, dict):
+    # shop 스키마의 equipped 슬롯을 먼저 병합
+    equipment_slots = {}
+    shop_equipped = user_data.get("equipped")
+    if isinstance(shop_equipped, dict):
+        equipment_slots.update(shop_equipped)
+    legacy_equipment = user_data.get("equipment")
+    if isinstance(legacy_equipment, dict):
+        for k, v in legacy_equipment.items():
+            equipment_slots.setdefault(k, v)
+
+    if not equipment_slots:
         return {}
 
     total = {}
@@ -245,33 +262,49 @@ def get_total_equipment_stats(user_data: dict) -> dict:
         if equipped_item is None:
             continue
 
-        # ★ equipped_item이 문자열(장비 ID)인 경우 → 정의에서 스탯 조회
+        # ★ equipped_item이 문자열(장비 ID)인 경우 → 정의에서 스탯 조회 + 강화 레벨 반영
         if isinstance(equipped_item, str):
-            definition = get_equipment_definition(equipped_item)
+            # shop 스키마 정의 파일(flat dict) 우선 사용
+            try:
+                from systems.enhancement import get_equip_def
+                definition = get_equip_def(equipped_item)
+            except Exception:
+                definition = None
+            if definition is None:
+                definition = get_equipment_definition(equipped_item)
             if definition is None:
                 continue
-            grade = definition.get("grade", "common")
-            grade_info = EQUIPMENT_GRADES.get(grade, EQUIPMENT_GRADES["common"])
-            multiplier = grade_info["stat_multiplier"]
-            base_stats = definition.get("base_stats", {})
+            base_stats = definition.get("stats") or definition.get("base_stats") or {}
+            grade = definition.get("rarity", definition.get("grade", "common"))
+            grade_info = EQUIPMENT_GRADES.get(grade, EQUIPMENT_GRADES.get("common", {"stat_multiplier": 1.0}))
+            multiplier = grade_info.get("stat_multiplier", 1.0)
+            enh_level = 0
+            try:
+                enh_level = int(enh_map.get(equipped_item, 0) or 0)
+            except (ValueError, TypeError):
+                pass
+            enh_mult = 1.0 + enh_level * EQUIP_ENHANCE_STAT_MULT
             for stat_key, base_val in base_stats.items():
-                final_val = int(base_val * multiplier)
-                total[stat_key] = total.get(stat_key, 0) + final_val
+                try:
+                    total[stat_key] = total.get(stat_key, 0) + int(int(base_val) * multiplier * enh_mult)
+                except (ValueError, TypeError):
+                    continue
             continue
 
         # ★ equipped_item이 dict가 아닌 다른 타입인 경우 건너뛰기
         if not isinstance(equipped_item, dict):
             continue
 
-        # 정상 dict 처리 (+ 강화 레벨 반영)
+        # 정상 dict 처리 (+ 강화 레벨 반영: dict 내부 값 또는 enh_map 우선)
         item_stats = equipped_item.get("stats", {})
         if not isinstance(item_stats, dict):
             continue
+        item_key = equipped_item.get("unique_id") or equipped_item.get("id")
+        enh_level = 0
         try:
-            from config import EQUIP_ENHANCE_STAT_MULT
-        except Exception:
-            EQUIP_ENHANCE_STAT_MULT = 0.12
-        enh_level = int(equipped_item.get("enhance_level", 0) or 0)
+            enh_level = int(enh_map.get(item_key, equipped_item.get("enhance_level", 0)) or 0)
+        except (ValueError, TypeError):
+            pass
         enh_mult = 1.0 + enh_level * EQUIP_ENHANCE_STAT_MULT
         for stat_key, stat_val in item_stats.items():
             try:

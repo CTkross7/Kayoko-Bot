@@ -207,20 +207,41 @@ def check_achievements(udata):
 #  플레이어 스탯
 # ──────────────────────────────────────────────────────────────────
 
+def _owns_cat_by_name(udata: dict, name: str) -> bool:
+    """일반 cats(dict/list) + enhanced_cats에서 이름으로 보유 여부 확인."""
+    cats = udata.get("cats") or {}
+    if isinstance(cats, dict):
+        # 키 자체가 이름인 경우 or value dict의 name이 일치하는 경우
+        if name in cats:
+            return True
+        for cid, info in cats.items():
+            if isinstance(info, dict) and info.get("name") == name:
+                return True
+    elif isinstance(cats, list):
+        for x in cats:
+            if isinstance(x, dict) and x.get("name") == name:
+                return True
+            if isinstance(x, str) and x == name:
+                return True
+    for inst in udata.get("enhanced_cats") or []:
+        if isinstance(inst, dict) and inst.get("name") == name:
+            return True
+    return False
+
+
 def _get_lead_cat_types(udata):
     """
     선봉 냥이(battle_team[0])의 (attack_type, defense_type)를 반환.
     미편성/미보유/속성없음이면 (none, none) → 배율 1.0.
     battle_team 포맷: 냥이 이름 리스트, [0]이 선봉.
+    강화 냥이(enhanced_cats)도 보유로 인정.
     """
     from models.element import get_cat_types, NONE_TYPE
     team = udata.get("battle_team") or []
     if not isinstance(team, list) or not team:
         return NONE_TYPE, NONE_TYPE
     lead_name = team[0]
-    # 실제 보유 여부 확인 (분양/상실된 냥이가 선봉에 남아있을 수 있음)
-    cats = udata.get("cats") or {}
-    if isinstance(cats, dict) and lead_name not in cats:
+    if not _owns_cat_by_name(udata, lead_name):
         return NONE_TYPE, NONE_TYPE
     try:
         from models.cat import get_cat_by_name

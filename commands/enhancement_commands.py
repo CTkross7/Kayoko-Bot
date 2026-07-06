@@ -225,6 +225,44 @@ class EnhancementCog(commands.Cog):
         else:
             await interaction.followup.send(f"❌ {msg}", ephemeral=True)
 
+    async def _enhanced_ac(self, interaction: discord.Interaction, current: str):
+        """보유 강화 냥이 자동완성 (iid 값)."""
+        data = load_user_data(interaction.user.id) or {}
+        out = []
+        cur = (current or "").lower()
+        for inst in data.get("enhanced_cats", []) or []:
+            if not isinstance(inst, dict):
+                continue
+            name = inst.get("name", "?")
+            iid = inst.get("iid", "")
+            label = f"{name} · {E.star_label(inst)}"
+            if not iid:
+                continue
+            if cur and cur not in name.lower():
+                continue
+            out.append(app_commands.Choice(name=label[:100], value=iid))
+            if len(out) >= 25:
+                break
+        return out
+
+    @app_commands.command(name="강화해제", description="강화 냥이를 일반 인벤토리로 되돌립니다. (진행도 소실 · 재료 일부 환급)")
+    @app_commands.describe(냥이="해제할 강화 냥이")
+    @app_commands.autocomplete(냥이=_enhanced_ac)
+    async def depromote_command(self, interaction: discord.Interaction, 냥이: str):
+        await interaction.response.defer(ephemeral=True)
+        data = load_user_data(interaction.user.id)
+        if not data:
+            await interaction.followup.send("❌ 먼저 `/가입` 해주세요.", ephemeral=True)
+            return
+        ok, msg, inst = E.depromote_enhanced(data, 냥이)
+        if not ok:
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+        save_user_data(interaction.user.id, data)
+        embed = discord.Embed(title="♻️ 강화 해제", description=msg, color=COLOR_DEFAULT)
+        embed.set_footer(text=f"보유: {ELIGMA} {data.get('eligma',0):,} · 💰 {data.get('money',0):,}원")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @app_commands.command(name="강화", description="강화 냥이를 성작/초월합니다.")
     async def enhance_command(self, interaction: discord.Interaction):
         data = load_user_data(interaction.user.id)
