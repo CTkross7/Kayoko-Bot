@@ -777,6 +777,7 @@ async def on_ready():
         "commands.gambling_commands",
         "commands.server_settings",
         "commands.vote_commands",
+        "commands.enhancement_commands",
 
     ]
     for cog in cog_modules:

@@ -600,8 +600,21 @@ class AdoptConfirmView(discord.ui.View):
             if isinstance(info, dict):
                 info["count"] = count - 1
         user_data["money"] = user_data.get("money", 0) + self.sell_price
+
+        # ── 엘리그마 확률 드랍 (희귀할수록 ↑, 일일 한도 적용) ──
+        eligma_gained = 0
+        try:
+            from systems.enhancement import roll_eligma_drop
+            eligma_gained = roll_eligma_drop(user_data, self.rarity)
+        except Exception:
+            eligma_gained = 0
+
         save_user_data(self.user.id, user_data)
-        embed = discord.Embed(title="✅ 분양 완료!", description=f"**{self.cat_name}**을(를) 분양했습니다.\n💰 **+{self.sell_price:,}원** 획득!", color=COLOR_SUCCESS)
+
+        desc = f"**{self.cat_name}**을(를) 분양했습니다.\n💰 **+{self.sell_price:,}원** 획득!"
+        if eligma_gained > 0:
+            desc += f"\n🔷 **+{eligma_gained} 엘리그마** 드랍! (강화 재료)"
+        embed = discord.Embed(title="✅ 분양 완료!", description=desc, color=COLOR_SUCCESS)
         embed.set_footer(text="카요코 봇", icon_url=BOT_ICON_URL)
         await interaction.response.edit_message(embed=embed, view=None)
 

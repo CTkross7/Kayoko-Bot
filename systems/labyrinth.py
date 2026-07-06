@@ -886,6 +886,26 @@ async def run_labyrinth_sequence(
 
         cat_list.append(cat_info)
 
+    # ── 강화(성작/초월) 냥이 편입 — 강화 스탯 반영 ──
+    # 일반 cats와 분리 저장된 enhanced_cats를 전투 풀에 합류시킨다.
+    # 강화 냥이는 스탯이 높아 자연스럽게 상위 3인 팀에 선발됨 → 수집·강화의 쓰임새.
+    try:
+        from systems.enhancement import get_enhanced_stats, star_label
+        for inst in user_data.get("enhanced_cats", []):
+            if not isinstance(inst, dict):
+                continue
+            s = get_enhanced_stats(inst)
+            cat_list.append({
+                "name": f"{s['name']} {star_label(inst)}",
+                "rarity": "epic",
+                "base_power": s["base_power"],
+                "hp": s["hp"],
+                "attack_type": s["attack_type"],
+                "defense_type": s["defense_type"],
+            })
+    except Exception:
+        pass
+
     if not cat_list:
         return None
 

@@ -82,6 +82,7 @@ def _sanitize_user_data(data: dict) -> bool:
         "battle_team": [],
         "unlocked_regions": ["alley"],
         "backup_purchases": [],
+        "enhanced_cats": [],
     }
 
     for field, default in list_fields.items():
@@ -122,9 +123,15 @@ def create_default_user_data(username: str) -> dict:
         # ── 냥이 인벤토리 ──
         "cats": {},
 
+        # ── 강화(성작/초월) 냥이 — 일반 cats와 분리 저장 ──
+        "enhanced_cats": [],
+
         # ── 재화 ──
         "money": 0,
         "tuna_can": 5,
+        "eligma": 0,
+        "eligma_today": 0,
+        "eligma_today_date": today,
 
         # ── 통계 ──
         "total_attempts": 0,
