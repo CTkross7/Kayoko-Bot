@@ -198,41 +198,43 @@ def _default_customization() -> dict:
     }
 
 
-def _apply_bg(customization) -> Image.Image:
+def _apply_bg(customization, height: int = H) -> Image.Image:
+    h = height
     bg = customization.get("bg", {})
     btype = bg.get("type", "gradient")
     if btype == "image":
         try:
-            img = Image.open(bg["path"]).convert("RGB").resize((W, H), Image.LANCZOS)
+            img = Image.open(bg["path"]).convert("RGB").resize((W, h), Image.LANCZOS)
             # 어둡게 오버레이 (텍스트 가독성)
-            ov = Image.new("RGBA", (W, H), (0, 0, 0, 110))
+            ov = Image.new("RGBA", (W, h), (0, 0, 0, 110))
             return Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
         except Exception:
             pass
     if btype == "solid":
-        return Image.new("RGB", (W, H), _hex_to_rgb(bg.get("color", "#1b1029")))
+        return Image.new("RGB", (W, h), _hex_to_rgb(bg.get("color", "#1b1029")))
     colors = [_hex_to_rgb(c) for c in bg.get("colors", ["#1b1029", "#3d1d4d"])]
     if len(colors) >= 3:
-        top = _vertical_gradient((W, H // 2), colors[0], colors[1])
-        bot = _vertical_gradient((W, H - H // 2), colors[1], colors[2])
-        canvas = Image.new("RGB", (W, H))
-        canvas.paste(top, (0, 0)); canvas.paste(bot, (0, H // 2))
+        top = _vertical_gradient((W, h // 2), colors[0], colors[1])
+        bot = _vertical_gradient((W, h - h // 2), colors[1], colors[2])
+        canvas = Image.new("RGB", (W, h))
+        canvas.paste(top, (0, 0)); canvas.paste(bot, (0, h // 2))
         return canvas
-    return _vertical_gradient((W, H), colors[0], colors[-1])
+    return _vertical_gradient((W, h), colors[0], colors[-1])
 
 
-def _draw_border(card: Image.Image, customization):
+def _draw_border(card: Image.Image, customization, height: int = H):
+    h = height
     border = customization.get("border", {})
     btype = border.get("type", "gradient")
     if btype == "none":
         return
     radius = 28
     inset = 10
-    box = (inset, inset, W - inset, H - inset)
+    box = (inset, inset, W - inset, h - inset)
     if btype == "gradient":
         colors = [_hex_to_rgb(c) for c in border.get("colors", ["#f8a8c4", "#8a5cff"])]
-        grad = _horizontal_gradient((W, H), colors[0], colors[-1]).convert("RGBA")
-        mask = Image.new("L", (W, H), 0)
+        grad = _horizontal_gradient((W, h), colors[0], colors[-1]).convert("RGBA")
+        mask = Image.new("L", (W, h), 0)
         md = ImageDraw.Draw(mask)
         md.rounded_rectangle(box, radius=radius, outline=255, width=6)
         card.paste(grad, (0, 0), mask)
@@ -361,8 +363,8 @@ def render_profile_card(data: dict, avatar_img: Image.Image = None, customizatio
     ]
     right = [
         ("🏆", "돈 순위", data.get("money_rank", "-")),
+        ("📊", "레벨 순위", data.get("level_rank", "-")),
         ("✅", "연속 출석", f"{data.get('streak', 0)}일"),
-        ("🏅", "업적", f"{data.get('achievements', 0)}개"),
         ("🏛️", "미궁 최고", f"{data.get('best_floor', 0)}층"),
         ("⭐", "스킬", f"추적{data.get('skill_track',0)}·전투{data.get('skill_combat',0)}·상술{data.get('skill_trade',0)}"),
     ]
@@ -390,6 +392,105 @@ def render_profile_card(data: dict, avatar_img: Image.Image = None, customizatio
     # 테두리(맨 위)
     _draw_border(card, cz)
 
+    out = io.BytesIO()
+    card.convert("RGB").save(out, format="PNG")
+    out.seek(0)
+    return out
+
+
+def render_stat_card(nickname: str, title: str, subtitle, sections, avatar_img=None,
+                     customization: dict = None) -> io.BytesIO:
+    """
+    범용 스탯 카드 (프로필 외 커맨드용). 배경/테두리/네온/색상 커스터마이징 공유.
+
+    sections: [(섹션명 or None, [(이모지, 라벨, 값), ...]), ...]
+    """
+    cz = _default_customization()
+    if customization:
+        cz.update({k: v for k, v in customization.items() if v is not None})
+    text_rgb = _hex_to_rgb(cz.get("text_color", "#e8e8f0"))
+    accent_rgb = _hex_to_rgb(cz.get("accent_color", "#f8a8c4"))
+    nick_color = cz.get("nickname_color", "#ffffff")
+    if nick_color == "random":
+        nick_color = random_hex()
+    nick_rgb = _hex_to_rgb(nick_color)
+
+    # ── 동적 높이: 섹션/행 수에 맞춰 카드 높이 계산 (내용 잘림 방지) ──
+    row_h = 58
+    hdr_h = 42
+    content = 0
+    for sec_name, rows in sections:
+        if sec_name:
+            content += hdr_h
+        content += ((len(rows) + 1) // 2) * row_h + 12
+    card_h = max(H, 226 + content + 70)
+
+    card = _apply_bg(cz, card_h).convert("RGBA")
+    panel = Image.new("RGBA", (W, card_h), (0, 0, 0, 0))
+    ImageDraw.Draw(panel).rounded_rectangle((28, 28, W - 28, card_h - 28), radius=26, fill=(10, 8, 18, 150))
+    card = Image.alpha_composite(card, panel)
+    draw = ImageDraw.Draw(card)
+
+    # 아바타(소형)
+    av_d, av_x, av_y = 120, 62, 56
+    if avatar_img is not None:
+        try:
+            av = _circle_avatar(avatar_img, av_d, ring_rgb=accent_rgb)
+            card.paste(av, (av_x, av_y), av)
+        except Exception:
+            avatar_img = None
+    if avatar_img is None:
+        ImageDraw.Draw(card).ellipse((av_x, av_y, av_x + av_d, av_y + av_d),
+                                     fill=(60, 40, 70, 255), outline=accent_rgb + (255,), width=5)
+
+    head_x = av_x + av_d + 30
+    max_w = W - head_x - 70
+    # 타이틀
+    tfont = _fit_font(draw, title, "extra", 50, 30, max_w)
+    ttxt = _truncate(draw, title, tfont, max_w)
+    if cz.get("nickname_neon"):
+        _neon_text(card, (head_x, 62), ttxt, tfont, nick_rgb, glow_rgb=accent_rgb)
+        draw = ImageDraw.Draw(card)
+    else:
+        draw.text((head_x, 62), ttxt, font=tfont, fill=nick_rgb + (255,))
+    y = 62 + tfont.size + 6
+    if subtitle:
+        sfont = _font("regular", 26)
+        draw.text((head_x, y), _truncate(draw, str(subtitle), sfont, max_w),
+                  font=sfont, fill=accent_rgb + (230,))
+        y += 32
+    draw.text((head_x, y), f"by {_truncate(draw, nickname, _font('regular',22), max_w)}",
+              font=_font("regular", 22), fill=tuple(int(c*0.8) for c in text_rgb))
+
+    # 구분선
+    dim = tuple(int(c * 0.55) for c in accent_rgb)
+    ImageDraw.Draw(card).line((60, 200, W - 60, 200), fill=dim, width=2)
+
+    # 섹션/행 렌더 (2열)
+    col_w = (W - 60 - 60 - 40) // 2
+    lx, rx = 66, 66 + col_w + 40
+    y = 226
+    for sec_name, rows in sections:
+        if sec_name:
+            # 액센트 바 + 섹션명 (이모지 미사용 → 폰트 깨짐 없음)
+            draw.rounded_rectangle((66, y + 2, 72, y + 26), radius=3, fill=accent_rgb + (255,))
+            draw.text((84, y), sec_name, font=_font("bold", 26), fill=accent_rgb + (255,))
+            y += hdr_h
+        for i, (em, lb, val) in enumerate(rows):
+            col_x = lx if i % 2 == 0 else rx
+            ry = y + (i // 2) * row_h
+            _stat_row(card, draw, col_x, ry, em, lb, val, text_rgb, accent_rgb, col_w)
+        y += ((len(rows) + 1) // 2) * row_h + 12
+
+    # 푸터
+    ffont = _font("regular", 22)
+    foot_rgb = (165, 165, 178)
+    if _paste_emoji(card, "🐾", 60, card_h - 54, 26):
+        ImageDraw.Draw(card).text((94, card_h - 52), "카요코 봇", font=ffont, fill=foot_rgb)
+    else:
+        draw.text((60, card_h - 52), "카요코 봇", font=ffont, fill=foot_rgb)
+
+    _draw_border(card, cz, card_h)
     out = io.BytesIO()
     card.convert("RGB").save(out, format="PNG")
     out.seek(0)

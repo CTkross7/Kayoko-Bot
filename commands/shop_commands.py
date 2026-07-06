@@ -448,6 +448,74 @@ class EquipSelect(discord.ui.Select):
         embed.set_footer(text=EMBED_FOOTER_TEXT, icon_url=ICON_URL)
         await interaction.response.send_message(embed=embed)
 
+# ─── 커스터마이징 상점 ─────────────────────────────────────────────
+
+from data_manager import load_json as _load_json_dm, save_json as _save_json_dm, get_user_filepath
+from systems import customization as _customize
+
+
+class CustomizeSelect(discord.ui.Select):
+    """커스터마이징 항목을 드롭다운으로 구매 → 즉시 적용 + 결과 안내 + 미리보기."""
+
+    def __init__(self, owner_id: int, owned: list):
+        self.owner_id = owner_id
+        options = []
+        for item_id, item in _customize.CUSTOMIZATION_ITEMS.items():
+            price = item.get("price", 0)
+            price_txt = "무료" if price == 0 else f"{price:,}원"
+            owned_mark = " ✓보유" if item_id in owned else ""
+            options.append(discord.SelectOption(
+                label=f"{item['name']}{owned_mark}"[:100],
+                description=f"{price_txt} · {item.get('desc','')}"[:100],
+                value=item_id,
+                emoji=item.get("emoji"),
+            ))
+        super().__init__(placeholder="커스터마이징 항목을 선택하세요...", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("본인만 조작할 수 있습니다.", ephemeral=True)
+            return
+
+        item_id = self.values[0]
+        fp = get_user_filepath(str(self.owner_id))
+
+        # ★ 원자적 저장 대상 원본을 그대로 로드 (마이그레이션/기본값 주입 없음)
+        data = _load_json_dm(fp, None)
+        if data is None:
+            await interaction.response.send_message("❌ 먼저 `/가입` 해주세요.", ephemeral=True)
+            return
+
+        ok, msg = _customize.purchase(data, item_id)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        # 구매 성공 → 원자적 저장 (재시작/에러에도 무손실)
+        try:
+            _save_json_dm(fp, data)
+        except Exception:
+            await interaction.response.send_message(
+                "❌ 저장 중 오류가 발생했습니다. 변경사항이 적용되지 않았습니다.", ephemeral=True
+            )
+            return
+
+        # 실시간 미리보기 카드
+        embed = discord.Embed(title="🎨 커스터마이징 적용 완료", description=msg, color=COLOR_SUCCESS)
+        try:
+            from utils.card_service import build_profile_card_file
+            file = await build_profile_card_file(interaction.user, data)
+            await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
+        except Exception:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class CustomizeView(discord.ui.View):
+    def __init__(self, owner_id: int, owned: list):
+        super().__init__(timeout=120)
+        self.add_item(CustomizeSelect(owner_id, owned))
+
+
 # ─── Cog ──────────────────────────────────────────────────────────
 
 class ShopCog(commands.Cog):
@@ -455,6 +523,34 @@ class ShopCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    @app_commands.command(name="커스터마이징", description="프로필 카드 디자인을 구매/변경합니다.")
+    async def customize_command(self, interaction: discord.Interaction):
+        fp = get_user_filepath(str(interaction.user.id))
+        data = _load_json_dm(fp, None)
+        if data is None:
+            await interaction.response.send_message("❌ 먼저 `/가입` 해주세요.", ephemeral=True)
+            return
+
+        owned = _customize.get_owned(data)
+        money = data.get("money", 0)
+
+        lines = [f"💰 보유 금액: **{money:,}원**\n"]
+        for item_id, item in _customize.CUSTOMIZATION_ITEMS.items():
+            price = item.get("price", 0)
+            price_txt = "무료" if price == 0 else f"{price:,}원"
+            mark = " ✓" if item_id in owned else ""
+            lines.append(f"{item.get('emoji','•')} **{item['name']}**{mark} — {price_txt}\n　{item.get('desc','')}")
+
+        embed = discord.Embed(
+            title="🎨 프로필 카드 커스터마이징",
+            description="\n".join(lines),
+            color=COLOR_DEFAULT,
+        )
+        embed.set_footer(text="랜덤 색상 항목은 구매 시 결과 헥사코드를 알려드립니다. · 재구매로 색 리롤 가능")
+        await interaction.response.send_message(
+            embed=embed, view=CustomizeView(interaction.user.id, owned), ephemeral=True
+        )
 
     @app_commands.command(name="상점", description="냥이 상점을 엽니다.")
     async def shop_command(self, interaction: discord.Interaction):

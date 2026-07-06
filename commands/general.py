@@ -76,19 +76,28 @@ async def _fetch_avatar_image(user):
     return None
 
 
-def _compute_money_rank(my_money: int) -> str:
-    """전체 유저 중 소지금 순위 (best-effort 스캔). 읽기 전용 — 데이터 변경 없음."""
+def _compute_ranks(my_money: int, my_level: int, my_exp: int = 0) -> dict:
+    """
+    전체 유저를 1회 스캔해 소지금·레벨 순위를 함께 계산 (읽기 전용, 데이터 변경 없음).
+    반환: {"money_rank": "N위", "level_rank": "N위"}
+    """
     try:
-        higher = 0
+        money_higher = 0
+        level_higher = 0
         for fn in os.listdir(USERS_DIR):
             if not fn.endswith(".json"):
                 continue
             d = _load_json(os.path.join(USERS_DIR, fn))
-            if isinstance(d, dict) and d.get("money", 0) > my_money:
-                higher += 1
-        return f"{higher + 1:,}위"
+            if not isinstance(d, dict):
+                continue
+            if d.get("money", 0) > my_money:
+                money_higher += 1
+            lv = d.get("level", 1)
+            if lv > my_level or (lv == my_level and d.get("exp", 0) > my_exp):
+                level_higher += 1
+        return {"money_rank": f"{money_higher + 1:,}위", "level_rank": f"{level_higher + 1:,}위"}
     except Exception:
-        return "-"
+        return {"money_rank": "-", "level_rank": "-"}
 
 
 def _is_user_banned(user_id: str) -> tuple[bool, str]:
@@ -481,130 +490,23 @@ class GeneralCog(commands.Cog):
         if updated:
             save_user_data(user_id_str, user_data)
 
-        level = user_data.get("level", 1)
-        exp = user_data.get("exp", 0)
-        next_exp = EXP_FOR_LEVEL(level)
-        money = user_data.get("money", 0)
-        tuna_can = user_data.get("tuna_can", 0)
-        skill_points = user_data.get("skill_points", 0)
-        skills = user_data.get("skills", {})
-        current_region = user_data.get("current_region", "서울 뒷골목")
-
-        if next_exp > 0:
-            ratio = min(exp / next_exp, 1.0)
-        else:
-            ratio = 1.0
-        bar_filled = int(ratio * 20)
-        bar_empty = 20 - bar_filled
-        exp_bar = "█" * bar_filled + "░" * bar_empty
-
-        if level >= MAX_LEVEL:
-            level_display = f"Lv.{level} **(MAX)**"
-        else:
-            level_display = f"Lv.{level}"
-
-        owned_cats = user_data.get("cats", user_data.get("owned_cats", {}))
-        total_cats = 0
-        for v in owned_cats.values():
-            if isinstance(v, dict):
-                total_cats += v.get("count", 0)
-            else:
-                total_cats += int(v)
-        catdex_count = len(user_data.get("catdex", {}))
-        if isinstance(user_data.get("catdex"), list):
-            catdex_count = len(user_data.get("catdex", []))
-
-        stats = user_data.get("stats", {})
-        battle_stats = user_data.get("battle_stats", {})
-        labyrinth_stats = user_data.get("labyrinth_stats", {})
-
-        # ★ 최상위 키가 0이면 stats 내부도 확인 (0은 falsy하므로 or 사용)
-        total_kidnaps = (
-            user_data.get("total_kidnaps")
-            or stats.get("total_kidnaps", 0)
-            or stats.get("successful_kidnaps", 0)
-        )
-
-        total_battles = (
-            battle_stats.get("total_battles")
-            or stats.get("total_battles", 0)
-        )
-
-        battle_wins = (
-            battle_stats.get("victories")
-            or stats.get("battle_wins", 0)
-        )
-
-        best_floor = (
-            labyrinth_stats.get("highest_floor")
-            or stats.get("labyrinth_best_floor", 0)
-            or user_data.get("labyrinth_best_floor", 0)
-        )
-
-        rare_bonus = get_skill_effect(user_data, SKILL_TREE_TRACKING, "rare_chance_bonus")
-        combat_power = get_skill_effect(user_data, SKILL_TREE_COMBAT, "battle_power_bonus")
-        shop_discount = get_skill_effect(user_data, SKILL_TREE_TRADE, "shop_discount")
-
-        equipped_title = user_data.get("equipped_title")
-
-        # 업적 수
-        achievements = user_data.get("achievements", {})
-        if isinstance(achievements, dict):
-            ach_count = len([k for k, v in achievements.items() if v])
-        elif isinstance(achievements, list):
-            ach_count = len(achievements)
-        else:
-            ach_count = 0
-
-        streak = user_data.get("daily_streak", 0)
-
-        # ── 프로필 카드 이미지 합성 ──
-        card_data = {
-            "nickname": target.display_name,
-            "title": equipped_title,
-            "level": level,
-            "level_max": level >= MAX_LEVEL,
-            "exp": exp,
-            "next_exp": next_exp,
-            "money": money,
-            "tuna_can": tuna_can,
-            "money_rank": _compute_money_rank(money),
-            "streak": streak,
-            "cats_owned": total_cats,
-            "catdex": catdex_count,
-            "battle_wins": battle_wins,
-            "best_floor": best_floor,
-            "achievements": ach_count,
-            "skill_track": skills.get(SKILL_TREE_TRACKING, 0),
-            "skill_combat": skills.get(SKILL_TREE_COMBAT, 0),
-            "skill_trade": skills.get(SKILL_TREE_TRADE, 0),
-            "footer_date": datetime.now(KST).strftime("%Y/%m/%d %H:%M"),
-        }
-
-        # 커스터마이징 (추후 상점 연동 — 유저별 저장값, 없으면 기본 테마)
-        customization = user_data.get("card_customization") or None
-
+        # ── 프로필 카드 이미지 합성 (utils.card_service 공용) ──
         try:
-            import asyncio
-            avatar_pil = await _fetch_avatar_image(target)
-            from utils.profile_card import render_profile_card
-            buf = await asyncio.to_thread(
-                render_profile_card, card_data, avatar_pil, customization
-            )
-            file = discord.File(buf, filename="profile.png")
+            from utils.card_service import build_profile_card_file
+            file = await build_profile_card_file(target, user_data)
             await interaction.followup.send(file=file)
-        except Exception as e:
+        except Exception:
             # ★ 렌더 실패 시 텍스트 폴백 (유저 데이터에는 영향 없음)
             import traceback
             traceback.print_exc()
-            level_display = f"Lv.{level}" + (" (MAX)" if level >= MAX_LEVEL else "")
+            level = user_data.get("level", 1)
+            money = user_data.get("money", 0)
             fallback = Embed(
                 title=f"💖 {target.display_name}의 캣맘 정보",
                 description=(
-                    f"**{level_display}** | {exp:,}/{next_exp:,} EXP\n"
-                    f"💰 **{money:,}원** | 🐟 {tuna_can}개\n"
-                    f"🐱 보유 {total_cats}마리 | 📖 도감 {catdex_count}종\n"
-                    f"⚔️ 전투 {battle_wins}승 | 🏛️ 미궁 {best_floor}층 | 🏅 업적 {ach_count}개"
+                    f"**Lv.{level}**"
+                    f"{' (MAX)' if level >= MAX_LEVEL else ''} | "
+                    f"💰 **{money:,}원** | 🐟 {user_data.get('tuna_can', 0)}개"
                 ),
                 color=COLOR_PRIMARY,
             )

@@ -175,72 +175,65 @@ class BattleCommandsCog(commands.Cog):
 
     @app_commands.command(name="전투정보", description="내 전투 스탯을 확인합니다.")
     async def battle_info_command(self, interaction):
+        await interaction.response.defer()
         udata = load_user(interaction.user.id)
         player = get_player_stats(udata)
         stats = udata.get("stats", {})
-
-        embed = discord.Embed(
-            title=f"⚔️ {interaction.user.display_name}의 전투 정보",
-            color=COLOR_DEFAULT,
-        )
-
-        hp_bar = _build_hp_bar(player["max_hp"], player["max_hp"])
-        embed.add_field(
-            name="📊 전투 스탯",
-            value=(
-                f"❤️ HP: {hp_bar} **{player['max_hp']}**\n"
-                f"⚔️ 공격력: **{player['attack']}**\n"
-                f"🛡️ 방어력: **{player['defense']}**"
-            ),
-            inline=False,
-        )
-
-        eq_stats = get_equipment_stats(udata)
         level = udata.get("level", 1)
-        combat_lv = udata.get("skills", {}).get("combat", 0)
-        combat_fx = SKILL_EFFECTS.get("combat", {})
+        eq_stats = get_equipment_stats(udata)
 
-        embed.add_field(
-            name="📋 스탯 분해",
-            value=(
-                f"기본(Lv.{level}): ATK {10+(level-1)*3}"
-                f" | HP {100+(level-1)*15}"
-                f" | DEF {5+(level-1)*2}\n"
-                f"전투 스킬(Lv.{combat_lv}):"
-                f" ATK +{combat_lv*combat_fx.get('battle_power_bonus',2.5):.0f}"
-                f" | HP +{combat_lv*combat_fx.get('battle_hp_bonus',8):.0f}\n"
-                f"장비: ATK +{eq_stats.get('attack',0)}"
-                f" | HP +{eq_stats.get('hp_bonus',0)}"
-            ),
-            inline=False,
-        )
+        from models.element import ATTACK_TYPES
+        lead = player.get("lead_cat")
+        lead_txt = "미편성"
+        if lead:
+            atk = player.get("attack_type")
+            tname = ATTACK_TYPES.get(atk, {}).get("name") if atk and atk != "none" else None
+            lead_txt = f"{lead} ({tname})" if tname else str(lead)
 
-        embed.add_field(
-            name="📈 전적",
-            value=(
-                f"승리: **{stats.get('battle_wins',0)}회**\n"
-                f"패배: **{stats.get('battle_losses',0)}회**\n"
-                f"주간 보스 처치: **{stats.get('weekly_boss_kills',0)}회**"
-            ),
-            inline=False,
-        )
-
+        sections = [
+            ("전투 스탯", [
+                ("❤️", "HP", f"{player['max_hp']}"),
+                ("⚔️", "공격력", f"{player['attack']}"),
+                ("🛡️", "방어력", f"{player['defense']}"),
+                ("🐱", "선봉", lead_txt),
+            ]),
+            ("전적", [
+                ("✅", "승리", f"{stats.get('battle_wins',0)}회"),
+                ("❌", "패배", f"{stats.get('battle_losses',0)}회"),
+                ("💀", "보스 처치", f"{stats.get('weekly_boss_kills',0)}회"),
+                ("🔧", "장비 ATK", f"+{eq_stats.get('attack',0)}"),
+            ]),
+        ]
         boss_key = _get_current_weekly_boss_key()
         if boss_key:
             tmpl = WEEKLY_BOSS_TEMPLATES.get(boss_key, {})
-            embed.add_field(
-                name=f"💀 이번 주 보스: {tmpl.get('name','???')}",
-                value=(
-                    f"HP: {tmpl.get('hp','?')}"
-                    f" | ATK: {tmpl.get('attack','?')}\n"
-                    f"도전 가능: "
-                    f"{'✅' if level >= _cfg.WEEKLY_BOSS_MIN_LEVEL else f'🔒 Lv.{_cfg.WEEKLY_BOSS_MIN_LEVEL} 필요'}"
-                ),
-                inline=False,
-            )
+            sections.append(("이번 주 보스", [
+                ("👹", "이름", tmpl.get("name", "?")),
+                ("❤️", "HP", f"{tmpl.get('hp','?')}"),
+                ("⚔️", "ATK", f"{tmpl.get('attack','?')}"),
+                ("🔓", "도전", "가능" if level >= _cfg.WEEKLY_BOSS_MIN_LEVEL else f"Lv.{_cfg.WEEKLY_BOSS_MIN_LEVEL} 필요"),
+            ]))
 
-        embed.set_footer(text=FOOTER_TEXT, icon_url=BOT_ICON_URL)
-        await interaction.response.send_message(embed=embed)
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, udata, title="전투 정보",
+                subtitle=f"Lv.{level}", sections=sections, filename="battle.png",
+            )
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            embed = discord.Embed(
+                title=f"⚔️ {interaction.user.display_name}의 전투 정보",
+                description=(
+                    f"❤️ HP **{player['max_hp']}** | ⚔️ ATK **{player['attack']}** | 🛡️ DEF **{player['defense']}**\n"
+                    f"승 {stats.get('battle_wins',0)} / 패 {stats.get('battle_losses',0)}"
+                ),
+                color=COLOR_DEFAULT,
+            )
+            embed.set_footer(text=FOOTER_TEXT, icon_url=BOT_ICON_URL)
+            await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="전투기록", description="전투 기록을 확인합니다.")
     async def battle_record_command(self, interaction):

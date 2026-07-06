@@ -24,11 +24,34 @@ def load_json(filepath: str, default=None):
 
 
 def save_json(filepath: str, data):
+    """
+    JSON을 원자적으로 저장한다.
+
+    ★ 데이터 무손실 보장:
+      같은 디렉토리에 임시파일로 먼저 완전히 기록한 뒤 os.replace로 교체한다.
+      쓰기 도중 크래시/에러가 나도 원본은 그대로 남으며(임시파일만 버려짐),
+      교체는 원자적이라 '반쯤 쓰다 만' 손상/초기화가 발생하지 않는다.
+    """
+    import tempfile
+
     dir_path = os.path.dirname(filepath)
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path or ".", prefix=".tmp_", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, filepath)  # 원자적 교체
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ═══════════════════════════════════════════════════════════

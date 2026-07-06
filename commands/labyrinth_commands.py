@@ -499,8 +499,32 @@ class LabyrinthCog(commands.Cog):
     async def labyrinth_record_command(self, interaction: discord.Interaction):
         await interaction.response.defer()
         user_data = load_user_data(str(interaction.user.id))
-        embed = build_labyrinth_record_embed(user_data, interaction.user)
-        await interaction.followup.send(embed=embed)
+
+        ls = user_data.get("labyrinth_stats", {})
+        st = user_data.get("stats", {})
+        sections = [
+            ("미궁 전적", [
+                ("🚪", "총 도전", f"{ls.get('total_runs', st.get('labyrinth_runs', 0))}회"),
+                ("⬆️", "최고 층", f"{ls.get('highest_floor', st.get('labyrinth_best_floor', 0))}층"),
+                ("🧗", "총 돌파", f"{ls.get('total_floors_cleared', st.get('labyrinth_total_floors', 0))}층"),
+            ]),
+            ("누적 보상", [
+                ("💵", "총 획득금", f"{ls.get('total_money_earned', st.get('labyrinth_total_money', 0)):,}원"),
+                ("✨", "총 경험치", f"{ls.get('total_exp_earned', st.get('labyrinth_total_exp', 0)):,}"),
+            ]),
+        ]
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, user_data, title="미궁 기록",
+                subtitle=f"Lv.{user_data.get('level', 1)}", sections=sections, filename="labyrinth.png",
+            )
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            embed = build_labyrinth_record_embed(user_data, interaction.user)
+            await interaction.followup.send(embed=embed)
 
 
 # ============================================================
