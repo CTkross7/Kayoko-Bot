@@ -237,39 +237,43 @@ class BattleCommandsCog(commands.Cog):
 
     @app_commands.command(name="전투기록", description="전투 기록을 확인합니다.")
     async def battle_record_command(self, interaction):
+        await interaction.response.defer()
         udata = load_user(interaction.user.id)
         stats = udata.get("stats", {})
-
         wins = stats.get("battle_wins", 0)
         losses = stats.get("battle_losses", 0)
         total = wins + losses
         winrate = (wins / max(total, 1)) * 100
-
-        embed = discord.Embed(
-            title=f"⚔️ {interaction.user.display_name}의 전투 기록",
-            color=COLOR_DEFAULT,
-        )
-        embed.add_field(
-            name="📊 전적",
-            value=(
-                f"총 전투: **{total}회**\n"
-                f"승리: **{wins}회** / 패배: **{losses}회**\n"
-                f"승률: **{winrate:.1f}%**"
-            ),
-            inline=False,
-        )
-
-        daily = udata.get("daily_actions", {})
-        battle_today = daily.get("battle", 0)
+        battle_today = udata.get("daily_actions", {}).get("battle", 0)
         battle_limit = DAILY_LIMITS.get("battle", 30)
-        embed.add_field(
-            name="📅 오늘 전투",
-            value=f"**{battle_today}/{battle_limit}회**",
-            inline=False,
-        )
 
-        embed.set_footer(text=FOOTER_TEXT, icon_url=BOT_ICON_URL)
-        await interaction.response.send_message(embed=embed)
+        sections = [
+            ("전적", [
+                ("⚔️", "총 전투", f"{total}회"),
+                ("✅", "승리", f"{wins}회"),
+                ("❌", "패배", f"{losses}회"),
+                ("📈", "승률", f"{winrate:.1f}%"),
+            ]),
+            ("오늘", [
+                ("📅", "오늘 전투", f"{battle_today}/{battle_limit}회"),
+            ]),
+        ]
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, udata, title="전투 기록",
+                subtitle=f"Lv.{udata.get('level',1)}", sections=sections, filename="battle_record.png",
+            )
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            embed = discord.Embed(
+                title=f"⚔️ {interaction.user.display_name}의 전투 기록",
+                description=f"총 {total}회 · 승 {wins} / 패 {losses} · 승률 {winrate:.1f}%",
+                color=COLOR_DEFAULT,
+            )
+            await interaction.followup.send(embed=embed)
 
 
 async def setup(bot):

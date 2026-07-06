@@ -638,8 +638,13 @@ class GameplayCog(commands.Cog):
         if not user_data:
             await interaction.followup.send("❌ 등록된 유저가 아닙니다. `/가입`을 먼저 입력해주세요.", ephemeral=True)
             return
-        embed = build_profile_embed(interaction.user, user_data)
-        await interaction.followup.send(embed=embed)
+        try:
+            from utils.card_service import build_profile_card_file
+            file = await build_profile_card_file(interaction.user, user_data)
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback; traceback.print_exc()
+            await interaction.followup.send(embed=build_profile_embed(interaction.user, user_data))
 
     # ---- /일일현황 ----
     @app_commands.command(name="일일현황", description="오늘의 활동 현황을 확인합니다.")
@@ -649,8 +654,26 @@ class GameplayCog(commands.Cog):
         if not user_data:
             await interaction.followup.send("❌ 등록된 유저가 아닙니다.", ephemeral=True)
             return
-        embed = build_daily_summary_embed(interaction.user, user_data)
-        await interaction.followup.send(embed=embed)
+        summary = get_daily_counts_summary(user_data)
+        act = {"kidnap": ("🐱", "납치"), "battle": ("⚔️", "전투"), "labyrinth": ("🏛️", "미궁"),
+               "gamble": ("🎰", "도박"), "equipment_buy": ("🛡️", "장비 구매")}
+        rows = []
+        for key, info in summary.items():
+            em, nm = act.get(key, ("•", key))
+            rows.append((em, nm, f"{info['current']}/{info['max']} (잔여 {info['remaining']})"))
+        sections = [("오늘의 활동 (자정 초기화)", rows)]
+        catchup = calculate_catchup_bonus(user_data)
+        if catchup > 0:
+            sections.append(("보너스", [("🌱", "캐치업", f"경험치 +{catchup*100:.0f}%")]))
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, user_data, title="일일 현황",
+                subtitle=f"Lv.{user_data.get('level',1)}", sections=sections, filename="daily.png")
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback; traceback.print_exc()
+            await interaction.followup.send(embed=build_daily_summary_embed(interaction.user, user_data))
 
     # ---- /스킬 ----
     @app_commands.command(name="스킬", description="스킬 트리를 확인합니다.")
@@ -660,8 +683,24 @@ class GameplayCog(commands.Cog):
         if not user_data:
             await interaction.followup.send("❌ 등록된 유저가 아닙니다.", ephemeral=True)
             return
-        embed = build_skill_tree_embed(interaction.user, user_data)
-        await interaction.followup.send(embed=embed)
+        skills = user_data.get("skills", {})
+        sp = user_data.get("skill_points", 0)
+        rows = [
+            ("🔍", "추적술", f"Lv.{skills.get('tracking',0)}/{MAX_SKILL_LEVEL}"),
+            ("⚔️", "전투술", f"Lv.{skills.get('combat',0)}/{MAX_SKILL_LEVEL}"),
+            ("💼", "상술", f"Lv.{skills.get('trade',0)}/{MAX_SKILL_LEVEL}"),
+            ("⭐", "잔여 포인트", f"{sp}P"),
+        ]
+        sections = [("스킬 트리", rows)]
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, user_data, title="스킬 트리",
+                subtitle=f"잔여 {sp}P", sections=sections, filename="skill.png")
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback; traceback.print_exc()
+            await interaction.followup.send(embed=build_skill_tree_embed(interaction.user, user_data))
 
     # ---- /스킬투자 ----
     @app_commands.command(name="스킬투자", description="스킬 포인트를 투자합니다.")
@@ -1055,8 +1094,43 @@ class GameplayCog(commands.Cog):
         if not user_data:
             await interaction.followup.send("❌ 등록된 유저가 아닙니다.", ephemeral=True)
             return
-        embed = get_kidnap_stats_embed(interaction.user, user_data)
-        await interaction.followup.send(embed=embed)
+
+        stats = user_data.get("stats", {})
+        total = stats.get("total_kidnaps", 0)
+        success = stats.get("successful_kidnaps", 0)
+        rate = (success / total * 100) if total > 0 else 0
+        cats_data = user_data.get("cats", {})
+        total_owned = sum(c.get("count", 0) if isinstance(c, dict) else 0 for c in cats_data.values()) if isinstance(cats_data, dict) else 0
+        species = len(user_data.get("catdex", {})) if isinstance(user_data.get("catdex"), dict) else 0
+
+        sections = [
+            ("전체 기록", [
+                ("🐾", "총 시도", f"{total}회"),
+                ("✅", "성공", f"{success}회"),
+                ("📈", "성공률", f"{rate:.1f}%"),
+                ("📖", "도감", f"{species}종 / {total_owned}마리"),
+            ]),
+        ]
+        # 등급별 포획 (이모지는 행 아이콘으로만 사용 → 값엔 텍스트만)
+        cats_caught = stats.get("cats_caught", {})
+        rarity_rows = []
+        for r in RARITY_ORDER:
+            cnt = cats_caught.get(r, 0)
+            if cnt > 0:
+                tier = RARITY_TIERS.get(r, {})
+                rarity_rows.append((tier.get("emoji", "⬜"), tier.get("name", r), f"{cnt}마리"))
+        if rarity_rows:
+            sections.append(("등급별 포획", rarity_rows))
+
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, user_data, title="납치 통계",
+                subtitle=f"Lv.{user_data.get('level',1)}", sections=sections, filename="kidnap.png")
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback; traceback.print_exc()
+            await interaction.followup.send(embed=get_kidnap_stats_embed(interaction.user, user_data))
 
 
 # ═══════════════════════════════════════════════════════════

@@ -205,34 +205,38 @@ class VoteCog(commands.Cog):
         last_date = vote_data.get("last_reward_date", "없음")
         claimed = vote_data.get("milestones_claimed", [])
 
-        # 마일스톤 진행도
-        milestone_lines = []
+        # 다음 마일스톤 (이모지 없는 라벨로 값 구성)
+        next_ms = "전부 달성"
         for threshold, info in sorted(VOTE_MILESTONE_REWARDS.items()):
-            if threshold in claimed:
-                milestone_lines.append(f"~~{info['label']} — {threshold}회~~  ✅")
-            elif total < threshold:
-                milestone_lines.append(f"{info['label']} — {threshold}회  (`{threshold - total}회 남음`)")
-            else:
-                milestone_lines.append(f"{info['label']} — {threshold}회  🔓 `/투표보상`으로 수령")
+            if threshold not in claimed and total < threshold:
+                next_ms = f"{threshold}회까지 {threshold - total}회"
+                break
 
-        embed = discord.Embed(
-            title="🗳️ 투표 현황",
-            color=COLOR_INFO,
-            timestamp=datetime.now(KST),
-        )
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        embed.add_field(name="누적 투표", value=f"`{total}회`", inline=True)
-        embed.add_field(name="연속 투표", value=f"`{streak}일`", inline=True)
-        embed.add_field(name="누적 보상", value=f"`{total_reward:,}G`", inline=True)
-        embed.add_field(name="마지막 수령", value=f"`{last_date}`", inline=True)
-        embed.add_field(
-            name="📊 마일스톤",
-            value="\n".join(milestone_lines) if milestone_lines else "없음",
-            inline=False,
-        )
-        embed.set_footer(text="매일 투표하여 연속 보너스를 받으세요!", icon_url=BOT_ICON_URL)
-
-        await interaction.followup.send(embed=embed)
+        sections = [
+            ("투표 현황", [
+                ("🗳️", "누적 투표", f"{total}회"),
+                ("🔥", "연속 투표", f"{streak}일"),
+                ("💰", "누적 보상", f"{total_reward:,}G"),
+                ("📅", "마지막 수령", str(last_date)),
+            ]),
+            ("마일스톤", [
+                ("🎯", "다음 목표", next_ms),
+                ("✅", "달성", f"{len(claimed)}개"),
+            ]),
+        ]
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, udata, title="투표 현황",
+                subtitle=f"연속 {streak}일", sections=sections, filename="vote.png")
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback; traceback.print_exc()
+            embed = discord.Embed(title="🗳️ 투표 현황", color=COLOR_INFO)
+            embed.add_field(name="누적 투표", value=f"{total}회", inline=True)
+            embed.add_field(name="연속 투표", value=f"{streak}일", inline=True)
+            embed.add_field(name="누적 보상", value=f"{total_reward:,}G", inline=True)
+            await interaction.followup.send(embed=embed)
 
     # ── /랭킹 ──
     @app_commands.command(name="랭킹", description="서버 랭킹을 확인합니다.")

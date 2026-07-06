@@ -270,112 +270,46 @@ class GamblingCog(commands.Cog):
             await interaction.response.send_message("❌ 유저 데이터를 불러올 수 없습니다.", ephemeral=True)
             return
 
+        await interaction.response.defer()
         _, count, limit = _check_daily(udata, "gamble")
         gamble = udata.get("stats", {}).get("gamble", {})
 
-        # 일일 현황 바
-        ratio = min(count / limit, 1.0) if limit > 0 else 0
-        filled = int(ratio * 15)
-        bar = "█" * filled + "░" * (15 - filled)
-
-        # 게임별 횟수
-        gacha_count = gamble.get("gacha_count", 0)
-        assault_count = gamble.get("assault_count", 0)
-        reroll_count = gamble.get("reroll_count", 0)
         total_count = gamble.get("total_count", 0)
-
-        # ★ 이익/손실
         total_profit = gamble.get("total_profit", 0)
-        gacha_profit = gamble.get("gacha_profit", 0)
-        assault_profit = gamble.get("assault_profit", 0)
-        reroll_profit = gamble.get("reroll_profit", 0)
 
-        # 색상: 이익이면 초록, 손실이면 빨강, 0이면 기본
-        if total_profit > 0:
-            embed_color = COLOR_SUCCESS
-        elif total_profit < 0:
-            embed_color = COLOR_ERROR
-        else:
-            embed_color = 0xFFD700
+        def fmt(val):
+            sign = "+" if val > 0 else ""
+            return f"{sign}{val:,}원"
 
-        # 이익/손실 포맷 함수
-        def fmt_profit(val):
-            if val > 0:
-                return f"📈 **+{val:,}원**"
-            elif val < 0:
-                return f"📉 **{val:,}원**"
-            else:
-                return "➖ **0원**"
-
-        embed = discord.Embed(
-            title=f"🎰 {interaction.user.display_name}의 도박 현황",
-            color=embed_color,
-        )
-
-        # 일일 사용량
-        embed.add_field(
-            name="📅 오늘 사용량",
-            value=f"`{bar}` **{count}/{limit}회** (잔여: {max(0, limit - count)}회)",
-            inline=False,
-        )
-
-        # ★ 총 이익/손실 (강조)
-        embed.add_field(
-            name="💰 총 누적 이익/손실",
-            value=fmt_profit(total_profit),
-            inline=False,
-        )
-
-        # 게임별 상세
-        embed.add_field(
-            name="🎰 가챠베팅",
-            value=f"횟수: **{gacha_count}회**\n수익: {fmt_profit(gacha_profit)}",
-            inline=True,
-        )
-        embed.add_field(
-            name="⚔️ 총력전배치고사",
-            value=f"횟수: **{assault_count}회**\n수익: {fmt_profit(assault_profit)}",
-            inline=True,
-        )
-        embed.add_field(
-            name="🔄 계정리세마라",
-            value=f"횟수: **{reroll_count}회**\n수익: {fmt_profit(reroll_profit)}",
-            inline=True,
-        )
-
-        # 총합
-        embed.add_field(
-            name="📊 전체 합계",
-            value=f"총 도박 횟수: **{total_count}회**",
-            inline=False,
-        )
-
-        # 평균 수익
-        if total_count > 0:
-            avg_profit = total_profit / total_count
-            avg_text = f"회당 평균: {fmt_profit(int(avg_profit))}"
-            embed.add_field(name="📐 평균 수익", value=avg_text, inline=False)
-
-        # 결과 분포 (가챠)
-        gacha_results = gamble.get("gacha_results", {})
-        if gacha_results:
-            lines = [f"  {name}: **{cnt}회**" for name, cnt in sorted(gacha_results.items(), key=lambda x: -x[1])]
-            embed.add_field(name="🎰 가챠 결과 분포", value="\n".join(lines), inline=False)
-
-        # 결과 분포 (총력전)
-        assault_results = gamble.get("assault_results", {})
-        if assault_results:
-            lines = [f"  {name}: **{cnt}회**" for name, cnt in sorted(assault_results.items(), key=lambda x: -x[1])]
-            embed.add_field(name="⚔️ 총력전 결과 분포", value="\n".join(lines), inline=False)
-
-        # 결과 분포 (리세마라)
-        reroll_results = gamble.get("reroll_results", {})
-        if reroll_results:
-            lines = [f"  {name}: **{cnt}회**" for name, cnt in sorted(reroll_results.items(), key=lambda x: -x[1])]
-            embed.add_field(name="🔄 리세마라 결과 분포", value="\n".join(lines), inline=False)
-
-        embed.set_footer(text=FOOTER_TEXT, icon_url=BOT_ICON_URL)
-        await interaction.response.send_message(embed=embed)
+        sections = [
+            ("누적 손익", [
+                ("💰", "총 손익", fmt(total_profit)),
+                ("📅", "오늘 사용", f"{count}/{limit}회"),
+                ("📊", "총 횟수", f"{total_count}회"),
+                ("📐", "회당 평균", fmt(int(total_profit / total_count)) if total_count else "0원"),
+            ]),
+            ("게임별", [
+                ("🎰", "가챠", f"{gamble.get('gacha_count',0)}회 · {fmt(gamble.get('gacha_profit',0))}"),
+                ("⚔️", "총력전", f"{gamble.get('assault_count',0)}회 · {fmt(gamble.get('assault_profit',0))}"),
+                ("🔄", "리세마라", f"{gamble.get('reroll_count',0)}회 · {fmt(gamble.get('reroll_profit',0))}"),
+            ]),
+        ]
+        try:
+            from utils.card_service import build_stat_card_file
+            file = await build_stat_card_file(
+                interaction.user, udata, title="도박 현황",
+                subtitle=f"Lv.{udata.get('level',1)}", sections=sections, filename="gamble.png",
+            )
+            await interaction.followup.send(file=file)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            embed = discord.Embed(
+                title=f"🎰 {interaction.user.display_name}의 도박 현황",
+                description=f"총 손익 {fmt(total_profit)} · 총 {total_count}회 · 오늘 {count}/{limit}",
+                color=COLOR_SUCCESS if total_profit >= 0 else COLOR_ERROR,
+            )
+            await interaction.followup.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
