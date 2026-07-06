@@ -45,13 +45,21 @@ class BattleCommandsCog(commands.Cog):
     # 선봉 냥이 편성 (/편성)
     # ─────────────────────────────────────────────
     async def _team_autocomplete(self, interaction: discord.Interaction, current: str):
-        """보유 냥이 이름 자동완성."""
+        """보유 냥이 이름 자동완성 (일반 cats + 강화 enhanced_cats 포함, 이름 기준)."""
         fp = get_user_filepath(str(interaction.user.id))
         data = load_json(fp, None) or {}
+        names: set[str] = set()
         cats = data.get("cats") or {}
-        names = list(cats.keys()) if isinstance(cats, dict) else []
+        if isinstance(cats, dict):
+            for cid, info in cats.items():
+                nm = info.get("name", cid) if isinstance(info, dict) else cid
+                if isinstance(nm, str) and nm:
+                    names.add(nm)
+        for inst in data.get("enhanced_cats") or []:
+            if isinstance(inst, dict) and isinstance(inst.get("name"), str):
+                names.add(inst["name"])
         cur = (current or "").lower()
-        filtered = [n for n in names if cur in n.lower()][:25]
+        filtered = sorted(n for n in names if cur in n.lower())[:25]
         return [app_commands.Choice(name=n[:100], value=n) for n in filtered]
 
     @app_commands.command(
@@ -71,8 +79,17 @@ class BattleCommandsCog(commands.Cog):
             )
             return
 
+        # 보유 확인: 일반 cats(이름) + 강화 enhanced_cats(이름) 통합
+        owned: set[str] = set()
         cats = data.get("cats") or {}
-        owned = set(cats.keys()) if isinstance(cats, dict) else set()
+        if isinstance(cats, dict):
+            for cid, info in cats.items():
+                nm = info.get("name", cid) if isinstance(info, dict) else cid
+                if isinstance(nm, str) and nm:
+                    owned.add(nm)
+        for inst in data.get("enhanced_cats") or []:
+            if isinstance(inst, dict) and isinstance(inst.get("name"), str):
+                owned.add(inst["name"])
 
         # ── 인자 없음: 현재 선봉 확인 ──
         if not 냥이:
