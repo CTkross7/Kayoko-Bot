@@ -915,8 +915,7 @@ class GameplayCog(commands.Cog):
         embed = view.build_page()
         await interaction.followup.send(embed=embed, view=view)
 
-    # ---- /냥이분양 ----
-    @app_commands.command(name="냥이분양", description="보유한 냥이를 분양(판매)합니다.")
+
     async def _owned_cats_autocomplete(self, interaction: discord.Interaction, current: str):
         """보유한 일반 냥이 자동완성 (이름 · 보유 수량 표시). 강화 냥이는 제외."""
         user_data = load_user_data(interaction.user.id) or {}
