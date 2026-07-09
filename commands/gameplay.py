@@ -944,6 +944,7 @@ class GameplayCog(commands.Cog):
             for nm, cnt in choices[:25]
         ]
 
+    @app_commands.command(name="냥이분양", description="보유한 냥이를 분양(판매)합니다.")
     @app_commands.describe(
         cat_name="분양할 냥이 (자동완성)",
         amount="분양 마리 수 (기본 1, 최대 999)",
