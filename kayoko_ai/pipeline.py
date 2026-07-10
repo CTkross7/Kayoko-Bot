@@ -123,12 +123,13 @@ def build_prompt(
 # ─────────────────────────────────────────────────────
 
 class KayokoPipeline:
-    def __init__(self, bot, gemini_rotator, usage_manager, ban_checker):
+    def __init__(self, bot, gemini_rotator, usage_manager, ban_checker, moderation=None):
         """
         bot: discord.Client/Bot
         gemini_rotator: main.py의 GeminiKeyRotator 인스턴스
         usage_manager: main.py의 KayokoUsageManager 인스턴스
         ban_checker: (user_id) -> (bool, dict|None)
+        moderation: systems.moderation.ModerationEngine 또는 None
         """
 
         # GeminiKeyRotator 클래스 자체가 들어오는 실수 방지
@@ -142,6 +143,7 @@ class KayokoPipeline:
         self.rotator = gemini_rotator
         self.usage = usage_manager
         self.ban_check = ban_checker
+        self.mod = moderation  # ModerationEngine (선택)
 
         self.embed = EmbeddingClient(gemini_rotator)
         self.kb = KnowledgeBase(self.embed)
@@ -226,14 +228,34 @@ class KayokoPipeline:
                 pass
             return True
 
-        # ── 사용량 체크 ──
-        can_chat, limit_msg = self.usage.check_can_chat(message.author.id)
+        # ── 사용량 체크 (유저 멘션도 함께 넘겨 서브텍스트에 포함) ──
+        try:
+            can_chat, limit_msg = self.usage.check_can_chat(
+                message.author.id, message.author.mention
+            )
+        except TypeError:
+            # 하위호환: 구 버전 usage_manager
+            can_chat, limit_msg = self.usage.check_can_chat(message.author.id)
         if not can_chat:
             try:
                 await message.reply(limit_msg)
             except Exception:
                 pass
             return True
+
+        # ── 모더레이션: 부적절 발화 감지 (로컬 키워드 pre-check) ──
+        if self.mod is not None:
+            try:
+                flagged, cat_key, cat_label = self.mod.fast_check(query)
+            except Exception:
+                flagged, cat_key, cat_label = False, None, None
+            if flagged:
+                # 응답 태스크로 위임 → AI 호출/고정 문구 분기
+                task = asyncio.create_task(
+                    self._respond_refusal(message, query, cat_key, cat_label)
+                )
+                AdaptiveReflex.attach(session, task)
+                return True
 
         # ── 어댑티브 리플렉스
         # 직접 호출일 때만 기존 응답을 끊습니다.
@@ -267,6 +289,68 @@ class KayokoPipeline:
         task = asyncio.create_task(self._respond(message, session, query, direct))
         AdaptiveReflex.attach(session, task)
         return True
+
+    # ─────────────────────────────────────────────
+    # 모더레이션 응답 (부적절 발화 감지 시)
+    # ─────────────────────────────────────────────
+
+    async def _respond_refusal(
+        self,
+        message: discord.Message,
+        query: str,
+        category_key: str | None,
+        category_label: str | None,
+    ):
+        """
+        부적절 발화 감지 시 대화 중단 응답.
+         · 임계 미만: AI로 톤을 조합해 문구 재구성 (1회 API 호출)
+         · 임계 이상: API 호출 없이 랜덤 템플릿 (고정 문구)
+        경고 카운트 증가, 사용량 카운트도 증가(스팸 방지).
+        """
+        try:
+            count = self.mod.record_warning(message.author.id, category_key)
+            skip_api = count > self.mod.threshold
+
+            refusal_text: str | None = None
+            if not skip_api:
+                # AI로 자연스러운 거부 문구 생성 (템플릿을 후보로 넘김)
+                try:
+                    refusal_prompt = self.mod.build_ai_refusal_prompt(query, category_label or "부적절")
+                    refusal_text = await self._generate(
+                        system_instruction=(
+                            "당신은 카요코입니다. 사용자의 부적절한 발언에 단호히 거부하고 대화를 끝내세요. "
+                            "1~2문장으로 짧게, 유해 내용을 인용하지 말고, 부드럽게 화제 돌리는 여지도 남기지 마세요."
+                        ),
+                        user_message=refusal_prompt,
+                    )
+                except Exception:
+                    refusal_text = None
+            if not refusal_text:
+                refusal_text = self.mod.pick_refusal()
+
+            # 서브텍스트: 상황 안내 (사용자가 무슨 일인지 알 수 있도록)
+            mode = "AI 조합" if not skip_api else "고정 문구(API 호출 절약)"
+            sub = (
+                f"⚠️ {message.author.mention} 님의 발언이 **[{category_label or '부적절'}]** "
+                f"카테고리로 감지되어 대화가 중단되었습니다. "
+                f"(경고 {count}/{self.mod.threshold}, {mode})"
+            )
+            body = f"{refusal_text}\n-# {sub}"
+
+            try:
+                await message.reply(body)
+            except Exception:
+                pass
+
+            # 사용량 소비 (스팸 방지)
+            try:
+                self.usage.increment(message.author.id)
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            traceback.print_exc()
 
     # ─────────────────────────────────────────────
     # 실제 응답 생성
