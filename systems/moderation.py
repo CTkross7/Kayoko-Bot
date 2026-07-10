@@ -12,8 +12,17 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import time
 from typing import Any
+
+
+def _normalize(s: str) -> str:
+    """
+    매칭용 정규화: 소문자화 + 모든 공백 제거.
+    "자살하고 싶어" ↔ "자살하고싶" 같은 공백 변형에도 매칭되도록 함.
+    """
+    return re.sub(r"\s+", "", (s or "").lower())
 
 
 DEFAULT_REFUSALS = [
@@ -101,12 +110,12 @@ class ModerationEngine:
     # ─── 카테고리 매칭 (로컬 · 0 API) ────────────────────────────
     def fast_check(self, text: str) -> tuple[bool, str | None, str | None]:
         """
-        키워드 매칭으로 부적절 카테고리 판정.
+        키워드 매칭으로 부적절 카테고리 판정. 공백/대소문자 무시.
         반환: (flagged, category_key, category_label)
         """
         if not text:
             return False, None, None
-        low = text.lower()
+        norm = _normalize(text)
         for cat_key, cat_data in self._categories().items():
             if not isinstance(cat_data, dict):
                 continue
@@ -116,7 +125,7 @@ class ModerationEngine:
             for kw in keywords:
                 if not isinstance(kw, str) or not kw.strip():
                     continue
-                if kw.lower() in low:
+                if _normalize(kw) in norm:
                     label = cat_data.get("label") or cat_key
                     return True, cat_key, label
         return False, None, None
