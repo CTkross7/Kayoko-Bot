@@ -662,22 +662,60 @@ gemini_rotator = GeminiKeyRotator(
 )
 
 
+import random as _rand_usage
+
+# ── 기본 안내 문구 (kayoko_settings.json에 리스트가 없을 때 폴백) ──
+_DEFAULT_DAILY_LIMIT_MSGS = [
+    "...선생님, 미안하지만 오늘은 너무 많이 대화했어. 내일 다시 이야기하자.",
+    "하아... 오늘 대화 한도를 다 썼어. 내일 다시 봐, 선생님.",
+    "...오늘은 여기까지야. 미안해. 내일 다시 얘기하자.",
+    "...하루에 대화할 수 있는 횟수가 정해져 있어. 미안, 내일 다시 봐.",
+    "휴... 오늘은 이만 쉬고 싶어. 내일 계속하자, 선생님.",
+]
+_DEFAULT_TOO_FAST_MSGS = [
+    "...너무 빨라, 선생님. 잠시만 기다려.",
+    "잠깐, 숨 좀 돌리자. 너무 빨라.",
+    "...하나씩 말해줘. 정리가 안 돼.",
+    "천천히 얘기해줄래? 못 따라가겠어.",
+    "휴... 조금만 쉬자. 너무 몰아쳐.",
+]
+
+
 class KayokoUsageManager:
-    """유저별 AI 대화 사용량 관리"""
+    """유저별 AI 대화 사용량 관리 (리스트 기반 문구 + 서브텍스트 안내)"""
 
     def __init__(self):
         self.usage_data = load_json(KAYOKO_USAGE_FILE, {})
-        settings = load_json(KAYOKO_SETTINGS_FILE, {})
-        self.max_daily = settings.get("max_daily_usage", 50)
+        self._reload_settings()
         self.max_per_minute = 2
         self.cooldown_seconds = 60
 
-    def check_can_chat(self, user_id: int) -> tuple:
+    def _reload_settings(self):
+        settings = load_json(KAYOKO_SETTINGS_FILE, {})
+        self.max_daily = int(settings.get("max_daily_usage", 50))
+        daily = settings.get("daily_limit_reached_messages")
+        self.daily_limit_msgs = [m for m in daily if isinstance(m, str) and m.strip()] \
+            if isinstance(daily, list) and daily else list(_DEFAULT_DAILY_LIMIT_MSGS)
+        fast = settings.get("too_fast_messages")
+        self.too_fast_msgs = [m for m in fast if isinstance(m, str) and m.strip()] \
+            if isinstance(fast, list) and fast else list(_DEFAULT_TOO_FAST_MSGS)
+
+    def _fmt(self, msg: str, subtext: str) -> str:
+        """카요코 대사 + 디스코드 서브텍스트(작은 회색 글씨) 결합."""
+        return f"{msg}\n-# {subtext}" if subtext else msg
+
+    def check_can_chat(self, user_id: int, user_mention: str | None = None) -> tuple[bool, str | None]:
+        """
+        반환: (허용 여부, 거부 메시지 or None)
+        거부 메시지엔 카요코 대사 + Discord 서브텍스트로 의미 안내를 포함한다.
+        """
+        self._reload_settings()  # 매번 최신 리스트 반영
         uid = str(user_id)
         kst = ZoneInfo("Asia/Seoul")
         now = datetime.now(timezone.utc).astimezone(kst)
         today = now.strftime("%Y-%m-%d")
         current_ts = datetime.now().timestamp()
+        mention = user_mention or f"<@{user_id}>"
 
         if uid not in self.usage_data:
             self.usage_data[uid] = {
@@ -701,11 +739,15 @@ class KayokoUsageManager:
 
         if len(info["minute_timestamps"]) >= self.max_per_minute:
             self._save()
-            return False, "...너무 빨라, 선생님. 잠시만 기다려."
+            msg = _rand_usage.choice(self.too_fast_msgs)
+            sub = f"💬 {mention} 님이 너무 빠르게 대화를 시도했습니다. 잠시 후 다시 시도해주세요."
+            return False, self._fmt(msg, sub)
 
         if info["count"] >= self.max_daily:
             self._save()
-            return False, "...미안하지만 오늘은 너무 많이 대화했어. 내일 다시 이야기하자."
+            msg = _rand_usage.choice(self.daily_limit_msgs)
+            sub = f"⏰ {mention} 님의 일일 카요코 대화 한도({self.max_daily}회)가 초과되었습니다. 매일 KST 자정에 초기화됩니다."
+            return False, self._fmt(msg, sub)
 
         self._save()
         return True, None
@@ -726,11 +768,16 @@ class KayokoUsageManager:
 
 usage_manager = KayokoUsageManager()
 
+# ── 카요코 AI 모더레이션 엔진 (부적절 발화 감지 + 반복 시 API 절약) ──
+from systems.moderation import ModerationEngine
+moderation_engine = ModerationEngine(KAYOKO_SETTINGS_FILE)
+
 kayoko_pipeline = KayokoPipeline(
     bot=bot,
     gemini_rotator=gemini_rotator,
     usage_manager=usage_manager,
     ban_checker=_check_all_bans,
+    moderation=moderation_engine,
 )
 
 # ── Gemini 비활성 키 주기적 재검증 태스크 ──
