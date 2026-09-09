@@ -79,10 +79,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or (
     TestBuild if os.getenv("BOT_ENV", "test") == "test" else KayokoToken
 )
 
-# Gemini API 키 리스트 (로테이션용)
-# 한도 초과 시 자동으로 다음 키로 전환됩니다.
-# 환경변수 GOOGLE_API_KEYS 에 쉼표(,)로 구분해서 여러 개 등록하세요.
-# 예) GOOGLE_API_KEYS="key1,key2,key3"
+# Gemini API 키 리스트
 GOOGLE_API_KEYS = [
     key.strip() for key in os.getenv("GOOGLE_API_KEYS", "").split(",") if key.strip()
 ]
