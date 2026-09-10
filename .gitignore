@@ -44,6 +44,7 @@ kayoko.json
 kayoko_settings.json
 *.key
 .env
+config.py
 
 # ─────────────────────────────────────────────────────
 # 파이썬 캐시
